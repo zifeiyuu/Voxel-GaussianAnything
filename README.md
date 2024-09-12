@@ -1,1 +1,1 @@
-# GuassianAnything
+# GaussianAnything
