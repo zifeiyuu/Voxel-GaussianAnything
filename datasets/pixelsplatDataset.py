@@ -22,7 +22,7 @@ class pixelsplatDataset(Dataset):
         # Load the .torch file
 
         self.base_dir = Path(__file__).resolve().parent.parent
-        file_path = self.base_dir / self.cfg['file_path']  
+        file_path = Path(self.cfg['file_path'])
         file_path = file_path.resolve()
         self.data = torch.load(file_path)
 

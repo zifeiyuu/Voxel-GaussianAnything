@@ -1,6 +1,6 @@
 dataset:
   mode: 'test'
-  file_path: './data/subset/test/000001.torch'
+  file_path: '/mnt/datasets/realestate10k/subset/test/000001.torch'
   height: 256
   width: 384
   pad_border_aug: 32

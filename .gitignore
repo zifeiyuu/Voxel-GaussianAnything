@@ -161,6 +161,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-exp
+
 experiments_out
-data
+exp/re10k_v2/checkpoints/model_re10k_v2.pth
