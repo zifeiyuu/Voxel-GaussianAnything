@@ -208,7 +208,8 @@ class GaussianPredictor(nn.Module):
                         continue
                     T = outputs[('cam_T_cam', 0, frame_id)]
                 
-                if cfg.train.use_gt_poses:
+                use_gt_poses = True ############################################## originally in cfg
+                if use_gt_poses:
                     pos = pos_input_frame
                 else:
                     P = rearrange(T[:, :3, :][:, None, ...].repeat(1, self.cfg.model.gaussians_per_pixel, 1, 1),

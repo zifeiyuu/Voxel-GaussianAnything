@@ -105,7 +105,8 @@ def render_predicted(cfg,
         "prefiltered": False,
         "debug": False
     }
-    if cfg.model.renderer_w_pose:
+    renderer_w_pose = True  #################################originally in cfg
+    if renderer_w_pose:
         kvargs |= {"projmatrix_raw": proj_mtrx}
 
     # Set up rasterization configuration

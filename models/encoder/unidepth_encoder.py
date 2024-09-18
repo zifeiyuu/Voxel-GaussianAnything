@@ -1,21 +1,33 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+import sys
 
 from einops import rearrange
 from models.encoder.resnet_encoder import ResnetEncoder
 from models.decoder.resnet_decoder import ResnetDecoder, ResnetDepthDecoder
+
+base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+
+unidepth_path = os.path.join(base_dir, 'UniDepth')
+
+sys.path.append(unidepth_path)
+
+from hubconf import UniDepth
 
 class UniDepthExtended(nn.Module):
     def __init__(self, cfg):
         super().__init__()
 
         self.cfg = cfg
-        self.unidepth = torch.hub.load(
-            "lpiccinelli-eth/UniDepth", "UniDepth", version=cfg.model.depth.version, 
-            backbone=cfg.model.depth.backbone, pretrained=True, trust_repo=True, 
-            force_reload=True
+        
+        self.unidepth = UniDepth(
+        version=cfg.model.depth.version, 
+        backbone=cfg.model.depth.backbone, 
+        pretrained=True
         )
+        print("UniDepth loaded!")
 
         self.parameters_to_train = []
         if cfg.model.backbone.name == "resnet":

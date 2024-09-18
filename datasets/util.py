@@ -6,6 +6,7 @@ from packaging.version import Version
 from datasets.re10k import Re10KDataset
 from datasets.nyu.dataset import NYUv2Dataset
 from datasets.kitti import KITTIDataset
+from datasets.pixelsplatDataset import pixelsplatDataset
 
 def create_datasets(cfg, split="val"):
     datasets_dict = {
@@ -30,6 +31,22 @@ def create_datasets(cfg, split="val"):
 
     return dataset, data_loader
 
+def create_datasets_GAT(cfg, split="val"):
+    dataset = pixelsplatDataset()
+    logging.info("There are {:d} {} items\n".format(len(dataset), split)
+    )
+    shuffle = True if split == "train" else False
+    data_loader = DataLoader(
+        dataset,
+        cfg.data_loader.batch_size,
+        shuffle=shuffle,
+        num_workers=cfg.data_loader.num_workers,
+        pin_memory=True,
+        drop_last=shuffle,
+        collate_fn=custom_collate,
+    )
+
+    return dataset, data_loader
 
 if Version(torch.__version__) < Version("1.11"):
     from torch.utils.data._utils.collate import default_collate
