@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from pathlib import Path
 import random
 import yaml  
+import os
 
 # Load configuration from GAT_config.yaml
 def load_config():
@@ -22,31 +23,88 @@ class pixelsplatDataset(Dataset):
         # Load the .torch file
 
         self.base_dir = Path(__file__).resolve().parent.parent
-        file_path = Path(self.cfg['file_path'])
-        file_path = file_path.resolve()
-        self.data = torch.load(file_path)
+        dataset_folder = Path(self.cfg['file_path'])
+        dataset_folder = dataset_folder.resolve()
+        specific_files = self.cfg.get('specific_files', []) 
+
+        self.data = []  
+        # Load specific files if provided
+        if specific_files:
+            for file_name in specific_files:
+                file_path = dataset_folder / (file_name + '.torch')  
+                if file_path.exists():  # Ensure the file exists
+                    loaded_data = torch.load(file_path)
+                    self.data.extend(loaded_data)  
+                else:
+                    print(f"File {file_path} not found.")
+        else: 
+            for file_name in os.listdir(dataset_folder):
+                if file_name.endswith('.torch'): 
+                    file_path = dataset_folder / file_name
+                    loaded_data = torch.load(file_path)
+                    self.data.extend(loaded_data) 
 
         self.image_processor = ImageProcessor(self.cfg)
+
+        self.frame_count = len(self.cfg['novel_frames']) + 1
+        # load dilation file
+        self.dilation = self.cfg['dilation']
+        self.max_dilation = self.cfg['max_dilation']
+        if isinstance(self.dilation, int):
+            self._left_offset = ((self.frame_count - 1) // 2) * self.dilation
+            fixed_dilation = self.dilation
+        else: # enters here when cfg.dataset.dilation = random
+            self._left_offset = 0
+            fixed_dilation = 0
+        if self.cfg['is_train']:
+            self.mode = 'train'
+        else:
+            self.mode = 'test'
 
         # Prepare the sequence data
         self._seq_data = {}
         for element in self.data:
             key = element['key']
             self._seq_data[key] = element
-            self._seq_keys = list(self._seq_data.keys())
+        self._seq_keys = list(self._seq_data.keys())
 
-        # Load the test split indices or generate indices based on the strategy
-        if self.cfg['test_split_path']:
-            test_split_path = Path(__file__).resolve().parent / self.cfg['test_split_path']
-            self._seq_key_src_idx_pairs = self._load_split_indices(test_split_path)
+        if self.cfg['is_train']:
+            self._seq_key_src_idx_pairs = self._full_index(self._seq_keys, 
+                self._seq_data, 
+                self._left_offset,                    # 0 when sampling dilation randomly
+                (self.frame_count-1) * fixed_dilation # 0 when sampling dilation randomly
+            )
+            if self.cfg['subset'] != -1: # use cfg.subset source frames, they might come from the same sequence
+                self._seq_key_src_idx_pairs = self._seq_key_src_idx_pairs[:self.cfg['subset']] * (len(self._seq_key_src_idx_pairs) // self.cfg['subset']) 
         else:
-            if load_config()['eval']['video_mode']:
-                self._seq_key_src_idx_pairs = self._generate_video_indices()
-            elif self.cfg['random_selection']:
-                self._seq_key_src_idx_pairs = self._generate_random_indices()
+            # Load the test split indices or generate indices based on the strategy
+            if self.cfg['test_split_path']:
+                test_split_path = Path(__file__).resolve().parent / self.cfg['test_split_path']
+                self._seq_key_src_idx_pairs = self._load_split_indices(test_split_path)
             else:
-                self._seq_key_src_idx_pairs = self._generate_default_indices()
-
+                if load_config()['eval']['video_mode']:
+                    self._seq_key_src_idx_pairs = self._generate_video_indices()
+                elif self.cfg['random_selection']:
+                    self._seq_key_src_idx_pairs = self._generate_random_indices()
+                else:
+                    self._seq_key_src_idx_pairs = self._generate_defined_indices(-30, 30)
+   
+    def _full_index(self, seq_keys, seq_data, left_offset, extra_frames):
+        # skip_bad = self.cfg['skip_bad_shape']
+        # if skip_bad:
+            # fn = self.data_path / "valid_seq_ids.train.pickle.gz"
+            # valid_seq_ids = pickle.load(gzip.open(fn, "rb"))
+        key_id_pairs = []
+        for seq_key in seq_keys:
+            seq_len = len(seq_data[seq_key]['timestamps'])
+            frame_ids = [i + left_offset for i in range(seq_len - extra_frames)]
+            # if skip_bad:
+            #     good_frames = valid_seq_ids[seq_key]
+            #     frame_ids = [f_id for f_id in frame_ids if f_id in good_frames]
+            seq_key_id_pairs = [(seq_key, f_id) for f_id in frame_ids]
+            key_id_pairs += seq_key_id_pairs
+        return key_id_pairs
+    
     def _load_split_indices(self, index_path):
         """Load the testing split from a text file."""
         def get_key_id(s):
@@ -77,30 +135,53 @@ class pixelsplatDataset(Dataset):
             key_id_pairs.append((key, frame_indices))
         return key_id_pairs
 
-    def _generate_default_indices(self):
-        """Generate default frame indices: (random, random+5, random+10, random)."""
+    def _generate_defined_indices(self, gap1=5, gap2=10):
+        """Generate default frame indices: (random, random+gap1, random+gap2, random)."""
         key_id_pairs = []
+        
         for key, element in self._seq_data.items():
             num_frames = len(element['timestamps'])
-            
-            # Ensure there are enough frames to select from
-            if num_frames < 11:
-                continue  # Skip if there are not enough frames
 
-            # Randomly select the input frame index
-            src_idx = random.randint(0, num_frames - 11)
-            # Determine the next two frames at +5 and +10 offsets
-            tgt_5_idx = src_idx + 5
-            tgt_10_idx = src_idx + 10
+            # Ensure gaps are not zero
+            if gap1 == 0 or gap2 == 0 or gap1 >= gap2:
+                print("Gaps cannot be zero.")
+                continue
             
+            if gap1 * gap2 > 0:
+                # Both gaps are positive
+                if max(abs(gap1), abs(gap2)) >= num_frames:
+                    print("No enough frames.")
+                    continue
+                if gap1 > 0 and gap2 > 0:
+                    src_idx = random.randint(0, num_frames - 1 - max(gap1, gap2))
+                
+                # Both gaps are negative
+                elif gap1 < 0 and gap2 < 0:
+                    src_idx = random.randint(-min(gap1, gap2), num_frames - 1)
+
+            else:
+                if gap2 - gap1 >= num_frames:
+                    print("No enough frames.")
+                    continue
+                src_idx = random.randint(-gap1, num_frames - 1 - gap2)
+            
+            # Determine the next two frames at +gap1 and +gap2 offsets
+            tgt_1_idx = src_idx + gap1
+            tgt_2_idx = src_idx + gap2
+
+            # Ensure the indices are within valid bounds
+            tgt_1_idx = max(0, min(tgt_1_idx, num_frames - 1))
+            tgt_2_idx = max(0, min(tgt_2_idx, num_frames - 1)) 
+
             # Randomly select a target frame different from the others
             tgt_random_idx = random.choice(
-                [i for i in range(num_frames) if i not in {src_idx, tgt_5_idx, tgt_10_idx}]
+                [i for i in range(num_frames) if i not in {src_idx, tgt_1_idx, tgt_2_idx}]
             )
 
-            key_id_pairs.append((key, [src_idx, tgt_5_idx, tgt_10_idx, tgt_random_idx]))
+            key_id_pairs.append((key, [src_idx, tgt_1_idx, tgt_2_idx, tgt_random_idx]))
+        
         return key_id_pairs
-    
+
     def _generate_video_indices(self):
         """Generate indices such that the middle frame is the source, and all other frames are targets."""
         key_id_pairs = []
@@ -124,8 +205,28 @@ class pixelsplatDataset(Dataset):
 
     def __getitem__(self, index):
         # Get the sequence key and frame indices
-        seq_key, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
-        element_data = self._seq_data[seq_key]
+        # print(len(self._seq_key_src_idx_pairs))
+        if self.cfg['is_train']:
+            seq_key, src_idx = self._seq_key_src_idx_pairs[index]
+            element_data = self._seq_data[seq_key]
+            seq_len = len(element_data["timestamps"])
+
+            if self.cfg['frame_sampling_method'] == "two_forward_one_back":
+                if self.dilation == "random":
+                    dilation = torch.randint(1, self.max_dilation, (1,)).item()
+                    left_offset = dilation 
+                else:
+                    dilation = self.dilation
+                    left_offset = self._left_offset
+                src_and_tgt_frame_idxs = [src_idx - left_offset + i * dilation for i in range(self.frame_count)]
+                src_and_tgt_frame_idxs = [src_idx] + [max(min(i, seq_len-1), 0) for i in src_and_tgt_frame_idxs if i != src_idx]
+            elif self.cfg['frame_sampling_method'] == "random":
+                target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
+                src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]                
+        else:
+            seq_key, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
+            element_data = self._seq_data[seq_key]
+
         total_frame_num = len(src_and_tgt_frame_idxs)
         frame_names = list(range(total_frame_num))
 
@@ -140,7 +241,6 @@ class pixelsplatDataset(Dataset):
             pose = np.array(pose).reshape(3, 4)  # Reshape pose to 3x4
 
             inputs_K_tgt, inputs_K_src, inputs_inv_K_src, inputs_T_c2w = self.image_processor.process_intrinsics_and_pose(intrinsic, pose)
-
             # Process the image for the current frame
             img_tensor = element_data['images'][frame_idx]
             inputs_color, inputs_color_aug = self.image_processor.process_image(img_tensor)
@@ -157,7 +257,7 @@ class pixelsplatDataset(Dataset):
         # Additional metadata
         input_frame_idx = src_and_tgt_frame_idxs[0]  # The source frame
         timestamp = self._seq_data[seq_key]["timestamps"][input_frame_idx]
-        inputs[("frame_id", 0)] = f"{self.cfg['mode']}+{seq_key}+{timestamp}"
+        inputs[("frame_id", 0)] = f"{self.mode}+{seq_key}+{timestamp}"
         inputs[("total_frame_num", 0)] = total_frame_num
 
         return inputs
@@ -202,7 +302,8 @@ class ImageProcessor:
             self.hue = 0.1
 
         # Set up color augmentation function
-        if self.cfg['do_color_aug']:
+        do_color_aug = self.cfg['is_train'] and random.random() > 0.5 and self.cfg['color_aug']
+        if do_color_aug:
             self.color_aug_fn = T.ColorJitter(
                 brightness=self.brightness, 
                 contrast=self.contrast, 

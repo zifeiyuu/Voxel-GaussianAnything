@@ -3,7 +3,7 @@ defaults:
   - hydra: defaults
   - model: gaussian
   - dataset: re10k
-  - loss: [reconstruction]
+  - loss: [reconstruction, regularization]  ##
 
 config:
   exp_name: "debug"
@@ -14,7 +14,7 @@ data_loader:
   num_workers: 16
 
 train:
-  logging: true
+  logging: false ##
   mixed_precision: #32-true, 16-mixed
   num_gpus: 1
   load_weights_folder:

@@ -94,7 +94,9 @@ class GaussianPredictor(nn.Module):
         cfg = self.cfg
         if "unidepth" in cfg.model.name:
             outputs = self.models["unidepth_extended"](inputs)
-        
+
+        # scale = self.cfg.model.scales[0]
+        # print(outputs[("inv_K_src", scale)].shape)
         self.compute_gauss_means(inputs, outputs)
 
         if cfg.model.gaussian_rendering:

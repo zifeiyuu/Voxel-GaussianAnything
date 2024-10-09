@@ -82,6 +82,7 @@ class BackprojectDepth(nn.Module):
         # self.ones = ones
 
     def forward(self, depth, inv_K):
+        # print(f"{inv_K.shape} == {self.pix_coords.shape}") 
         cam_points = torch.matmul(inv_K[:, :3, :3], self.pix_coords.to(depth.device))
         cam_points = depth.view(self.batch_size, 1, -1) * cam_points
         cam_points = torch.cat([cam_points, self.ones.to(depth.device)], 1)

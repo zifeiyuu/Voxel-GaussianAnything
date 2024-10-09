@@ -16,7 +16,7 @@ import torchvision.transforms.functional as TF
 
 from models.model import GaussianPredictor, to_device
 from evaluation.evaluator import Evaluator
-from datasets.util import create_datasets
+# from datasets.util import create_datasets
 from misc.util import add_source_frame_id
 from misc.visualise_3d import save_ply
 
@@ -29,54 +29,70 @@ def get_model_instance(model):
     """
     return model.ema_model if type(model).__name__ == "EMA" else model
 
-def generate_video(model, cfg, dataloader, device=None, video_root_path= None, scene_ids = [0]):
+def generate_video(model, cfg, dataloader, device=None, video_root_path= None, scene_ids = [0], original_video = False):
     model_model = get_model_instance(model)
     model_model.set_eval()
     dataloader_iter = iter(dataloader)
     scene_num = 0
     now = datetime.now()
+    # Create a timestamped directory for video output
+    timestamped_dir = Path(f"{video_root_path}/{now:%Y-%m-%d}_{now:%H-%M-%S}")
+    timestamped_dir.mkdir(parents=True, exist_ok=True)
 
-    for k in tqdm([i for i in range(len(dataloader.dataset) // cfg.data_loader.batch_size)]):
+    for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)]):
         inputs = next(dataloader_iter)
-        if scene_num not in scene_ids:
-            scene_num += 1
-            continue
-        
-        # Create a timestamped directory for video output
-        timestamped_dir = Path(f"{video_root_path}/{now:%Y-%m-%d}_{now:%H-%M-%S}")
-        timestamped_dir.mkdir(parents=True, exist_ok=True)
-        video_path = str(timestamped_dir / f"{scene_num}.mp4")   # "video_{inputs[('frame_id', 0)]}.mp4"
-        
-        with torch.no_grad():
-            if device is not None:
-                to_device(inputs, device)
-            target_frame_ids = list(range(1, inputs[('total_frame_num', 0)]))
-            inputs["target_frame_ids"] = target_frame_ids
-            outputs = model(inputs)
+        if scene_ids:
+            if scene_num not in scene_ids:
+                scene_num += 1
+                continue
 
-        src_frame = outputs[('color_gauss', 0, 0)]
+        video_path = str(timestamped_dir / f"{scene_num}.mp4")   # "video_{inputs[('frame_id', 0)]}.mp4"
+
+        if original_video:
+            src_frame = inputs[('color', 0, 0)]
+        else:
+            with torch.no_grad():
+                if device is not None:
+                    to_device(inputs, device)
+                target_frame_ids = list(range(1, inputs[('total_frame_num', 0)]))
+                inputs["target_frame_ids"] = target_frame_ids
+                outputs = model(inputs)
+            src_frame = outputs[('color_gauss', 0, 0)]
+
         height, width = src_frame.shape[2], src_frame.shape[3]
         video = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), 30, (width, height))
 
+        # Convert the source frame to numpy format for writing
         src_frame_np = src_frame[0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy() * 255
         src_frame_np = src_frame_np.astype(np.uint8)
-        mid_num = inputs[('total_frame_num', 0)] // 2 + 1
+        # Convert from RGB to BGR for OpenCV
+        src_frame_np = cv2.cvtColor(src_frame_np, cv2.COLOR_RGB2BGR)
 
+        mid_num = inputs[('total_frame_num', 0)] // 2 + 1
         ff_id = 1
         src_added = False
-        while ff_id < inputs[('total_frame_num', 0)]:
-            if ff_id == mid_num and not src_added:
-                video.write(src_frame_np)
-                src_added = True
-                continue
-            pred = outputs[('color_gauss', ff_id, 0)]
-            pred_frame = pred[0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy() * 255
-            pred_frame = pred_frame.astype(np.uint8)
 
-            video.write(pred_frame)
-            ff_id += 1
+        try: 
+            while ff_id < inputs[('total_frame_num', 0)]:
+                if ff_id == mid_num and not src_added:
+                    video.write(src_frame_np)
+                    src_added = True
+                    continue
+                if original_video:
+                    cur = inputs[('color', ff_id, 0)] #ground truth current image
+                else:
+                    cur = outputs[('color_gauss', ff_id, 0)] #predicted current image
 
-        video.release()
+                cur_frame = cur[0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy() * 255
+                cur_frame = cur_frame.astype(np.uint8)
+                # Convert from RGB to BGR for OpenCV
+                cur_frame = cv2.cvtColor(cur_frame, cv2.COLOR_RGB2BGR)
+
+                video.write(cur_frame)
+                ff_id += 1
+        finally:
+            video.release()
+
         print(f"Video {scene_num} saved at {video_path}")
         scene_num += 1
     
@@ -95,12 +111,12 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
 
     dataloader_iter = iter(dataloader)
     now = datetime.now()
+    out_dir = output_path / f"{now:%Y-%m-%d}_{now:%H-%M-%S}"
+    out_dir.mkdir(exist_ok=True)
     spliced_images_list = []
 
     for k in tqdm([i for i in range(len(dataloader.dataset) // cfg.data_loader.batch_size)]):
         if save_vis:
-            out_dir = output_path / f"{now:%Y-%m-%d}_{now:%H-%M-%S}"
-            out_dir.mkdir(exist_ok=True)
             print(f"saving images to: {out_dir}")
             seq_name = dataloader.dataset._seq_keys[k]
             out_out_dir = out_dir / seq_name
@@ -206,13 +222,13 @@ def main(cfg: DictConfig):
     os.chdir(output_dir)
     print("Working dir:", output_dir)
 
+    GAT_cfg = load_config()['eval']
+
     cfg.data_loader.batch_size = 1
     cfg.data_loader.num_workers = 1
     model = GaussianPredictor(cfg)
     device = torch.device("cuda:0")
     model.to(device)
-
-    GAT_cfg = load_config()['eval']
 
     base_dir = Path(__file__).resolve().parent
 
@@ -222,15 +238,16 @@ def main(cfg: DictConfig):
         model.load_model(ckpt_path, ckpt_ids=0)
 
     split = "test"
-    dataset, dataloader = create_datasets_GAT(cfg, split=split)
+    dataset, dataloader = create_datasets_GAT(cfg, split = split)
 
     video_mode = GAT_cfg['video_mode']
+    original_video = GAT_cfg['original_video']
     scene_ids = GAT_cfg['scene_ids']
     output_path = base_dir / GAT_cfg['output_path']
     output_path.resolve()
 
     if video_mode:
-        generate_video(model, cfg, dataloader, device=device, video_root_path = output_path, scene_ids = scene_ids)
+        generate_video(model, cfg, dataloader, device=device, video_root_path = output_path, scene_ids = scene_ids, original_video= original_video)
     else:
         evaluator = Evaluator(crop_border=True)
         evaluator.to(device)

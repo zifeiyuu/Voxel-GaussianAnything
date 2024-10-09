@@ -1,18 +1,39 @@
 dataset:
-  mode: 'test'
-  file_path: '/mnt/datasets/realestate10k/subset/test/000001.torch'
+  is_train: true
+  file_path: '/mnt/datasets/realestate10k/re10k/train/train1/'
+  specific_files: ['000004'] 
   height: 256
   width: 384
   pad_border_aug: 32
-  do_color_aug: False
+  color_aug: false
   scales: [0]
   test_split_path: null  
   random_selection: False 
-eval: #use GAT_evaluate.py currently
+  subset: -1
+  novel_frames: [1, 2, 3]
+  dilation: random
+  max_dilation: 15
+  skip_bad_shape: false
+  frame_sampling_method: random
+
+eval: 
   output_path: './output'
   ckpt_path: './exp/re10k_v2/checkpoints'
-  video_mode: false
-  scene_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  video_mode: true
+  original_video: true
+  scene_ids: []
+train:
+  output_path: './output'
+  ckpt_path: #'./exp/re10k_v2/checkpoints'
+  seed: 42
+  num_gpus: 1
+  mixed_precision: 32 #32-true, 16-mixed
+  use_ema: true
+
+  optimiser:
+    learning_rate: 1e-4
+    scheduler_lambda_step_size: 60000
+
 
 
 #File "/mnt/ziyuxiao/code/GaussianAnything/models/decoder/gauss_util.py", line 108, in render_predicted

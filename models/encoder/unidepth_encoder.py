@@ -21,12 +21,19 @@ class UniDepthExtended(nn.Module):
         super().__init__()
 
         self.cfg = cfg
-        
+
+        # self.unidepth = torch.hub.load(
+        #     "lpiccinelli-eth/UniDepth", "UniDepth", version=cfg.model.depth.version, 
+        #     backbone=cfg.model.depth.backbone, pretrained=True, trust_repo=True, 
+        #     force_reload=True
+        # )
+
         self.unidepth = UniDepth(
         version=cfg.model.depth.version, 
         backbone=cfg.model.depth.backbone, 
         pretrained=True
         )
+        
         print("UniDepth loaded!")
 
         self.parameters_to_train = []
@@ -70,8 +77,9 @@ class UniDepthExtended(nn.Module):
             with torch.no_grad():
                 intrinsics = inputs[("K_src", 0)] if ("K_src", 0) in inputs.keys() else None
                 depth_outs = self.unidepth.infer(inputs["color_aug", 0, 0], intrinsics=intrinsics)
-        outputs_gauss = {}
 
+        outputs_gauss = {}
+        # print(inputs[("K_src", 0)].shape)
         outputs_gauss[("K_src", 0)] = inputs[("K_src", 0)] if ("K_src", 0) in inputs.keys() else depth_outs["intrinsics"]
         outputs_gauss[("inv_K_src", 0)] = torch.linalg.inv(outputs_gauss[("K_src", 0)])
 

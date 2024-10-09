@@ -47,7 +47,7 @@ class Re10KDataset(data.Dataset):
         self.depth_path = None
         if self.cfg.dataset.preload_depths:
             assert cfg.dataset.depth_path is not None
-            self.depth_path = Path(self.cfg.dataset.depth_path)
+            self.depth_path = Path(self.cfg.dataset.depth_path) #depth
 
         self.split = split
         self.image_size = (self.cfg.dataset.height, self.cfg.dataset.width)
@@ -92,7 +92,7 @@ class Re10KDataset(data.Dataset):
         self.dilation = cfg.dataset.dilation
         self.max_dilation = cfg.dataset.max_dilation
         if isinstance(self.dilation, int):
-            self._left_offset = ((self.frame_count - 1) // 2) * self.dilation
+            self._left_offset = ((self.frame_count - 1) // 2) * self.dilation ######
             fixed_dilation = self.dilation
         else: # enters here when cfg.dataset.dilation = random
             self._left_offset = 0
@@ -273,7 +273,8 @@ class Re10KDataset(data.Dataset):
                     dilation = self.dilation
                     left_offset = self._left_offset
                 # frame count is num_novel_frames + 1 for source view
-                # sample one frame in backwards time and self.frame_count - 2 into the future
+                # sample one frame in backwards time and self.frame_count - 2 into the future  
+                # self.frame_count = len(self.novel_frames) + 1, gauss_novel_frames: [1, 2] #
                 src_and_tgt_frame_idxs = [src_idx - left_offset + i * dilation for i in range(self.frame_count)]
                 # reorder and make sure indices don't go beyond start or end of the sequence
                 src_and_tgt_frame_idxs = [src_idx] + [max(min(i, seq_len-1), 0) for i in src_and_tgt_frame_idxs if i != src_idx]
@@ -282,7 +283,7 @@ class Re10KDataset(data.Dataset):
                 target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
                 # check that 0 is not included and that the indides dont go beyond the end of the sequence
                 src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]                
-            frame_names = [0] + self.novel_frames
+            frame_names = [0] + self.novel_frames   #novel frame number is set in cfg
 
         # load src, 5 frames into future, 10 frames into future and random
         # follows MINE split and evaluation protocol
