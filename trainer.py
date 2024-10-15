@@ -13,7 +13,7 @@ from misc.util import sec_to_hm_str
 
 from models.encoder.layers import SSIM
 from evaluate import evaluate, get_model_instance
-from src.splatt3r_src.loss_mask import calculate_in_frustum_mask
+from src.splatt3r_src.loss_mask import calculate_in_frustum_mask_single
 
 
 class Trainer(nn.Module):

@@ -12,6 +12,8 @@ import logging
 import json
 import cv2
 
+from src.splatt3r_src.loss_mask import calculate_in_frustum_mask_single
+
 logger = logging.getLogger(__name__)
 
 # Load configuration from GAT_config.yaml
