@@ -4,6 +4,7 @@ import torch.nn as nn
 import numpy as np
 
 from einops import rearrange
+from pathlib import Path
 
 from models.model import GaussianPredictor
 from torchmetrics.image import LearnedPerceptualImagePatchSimilarity
@@ -12,13 +13,15 @@ from misc.util import sec_to_hm_str
 
 from models.encoder.layers import SSIM
 from evaluate import evaluate, get_model_instance
+from src.splatt3r_src.loss_mask import calculate_in_frustum_mask
 
 
 class Trainer(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, GAT_cfg):
         super().__init__()
 
         self.cfg = cfg
+        self.GAT_cfg = GAT_cfg
         self.step = 0
         self.model = GaussianPredictor(cfg)
         if cfg.loss.ssim.weight > 0:
@@ -26,14 +29,49 @@ class Trainer(nn.Module):
         if cfg.loss.lpips.weight > 0:
             self.lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg")
         self.logger = None
+        base_dir = Path(__file__).resolve().parent
+        print(f"base dir: {base_dir}")
+        self.output_path = base_dir / GAT_cfg['output_path']
+        self.output_path.resolve()
 
     def set_logger(self, logger):
         self.logger = logger
 
     def forward(self, inputs):
         outputs = self.model.forward(inputs)
-        losses = self.compute_losses(inputs, outputs)
+        if self.GAT_cfg['add_mask']:
+            mask = self.calculate_mask(inputs)
+        else:
+            mask = None
+        losses = self.compute_losses(inputs, outputs, mask)
         return losses, outputs
+    
+    def calculate_mask(self, inputs):
+        return 1
+        # self.inputs = inputs
+        # for frame_name in frame_names:
+        #     if frame_name == 0:
+        #         context_depth = self.inputs[("depth", frame_name)]
+        #         context_intrinsics = self.inputs[("K_tgt", frame_name)]
+        #         context_c2w = self.inputs[("T_c2w", frame_name)]   
+        #     else:             
+        #         target_depth = self.inputs[("depth", frame_name)]
+        #         target_intrinsics = self.inputs[("K_tgt", frame_name)]
+        #         target_c2w = self.inputs[("T_c2w", frame_name)]
+
+        # target_depth = torch.stack([target_view['depthmap'] for target_view in inputs['target']], dim=1)
+        # target_intrinsics = torch.stack([target_view['camera_intrinsics'] for target_view in inputs['target']], dim=1)
+        # target_c2w = torch.stack([target_view['camera_pose'] for target_view in inputs['target']], dim=1)
+        # context_depth = torch.stack([context_view['depthmap'] for context_view in inputs['context']], dim=1)
+        # context_intrinsics = torch.stack([context_view['camera_intrinsics'] for context_view in inputs['context']], dim=1)
+        # context_c2w = torch.stack([context_view['camera_pose'] for context_view in inputs['context']], dim=1)
+
+        # target_intrinsics = target_intrinsics[..., :3, :3]
+        # context_intrinsics = context_intrinsics[..., :3, :3]
+
+        # mask = calculate_in_frustum_mask(target_depth, target_intrinsics, target_c2w, context_depth, context_intrinsics, context_c2w)
+
+        # return mask
     
     def compute_reconstruction_loss(self, pred, target, losses):
         """Computes reprojection loss between a batch of predicted and target images
@@ -63,7 +101,7 @@ class Trainer(nn.Module):
         
         return rec_loss
     
-    def compute_losses(self, inputs, outputs):
+    def compute_losses(self, inputs, outputs, mask):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         cfg = self.cfg
@@ -200,12 +238,14 @@ class Trainer(nn.Module):
                         self.step
                     )
 
-    def validate(self, model, evaluator, val_loader, device):
+    def validate(self, model, evaluator, val_loader, device, output_path = None):
         """
         model may not be the same as trainer, in case of wrapping it in EMA
         sets model to eval mode by evaluate()
         """
-        score_dict_by_name = evaluate(model, self.cfg, evaluator, val_loader, device)
+        if not output_path:
+            output_path = self.output_path
+        score_dict_by_name = evaluate(model, self.cfg, evaluator, val_loader, device, False, output_path)
         split = "val"
         out = {}
         for metric in evaluator.metric_names():

@@ -1,34 +1,25 @@
-dataset:
-  is_train: true
-  file_path: '/mnt/datasets/realestate10k/re10k/train/train1/'
-  specific_files: ['000004'] 
-  height: 256
-  width: 384
-  pad_border_aug: 32
-  color_aug: false
-  scales: [0]
-  test_split_path: null  
-  random_selection: False 
-  subset: -1
-  novel_frames: [1, 2, 3]
-  dilation: random
-  max_dilation: 15
-  skip_bad_shape: false
-  frame_sampling_method: random
-
 eval: 
+  is_train: false
+
+  video_mode: false
+  original_video: true
+  save_vis: true
+  dataset: scannetpp
   output_path: './output'
   ckpt_path: './exp/re10k_v2/checkpoints'
-  video_mode: true
-  original_video: true
   scene_ids: []
 train:
+  is_train: true
+  video_mode: false
+
+  dataset: scannetpp
   output_path: './output'
   ckpt_path: #'./exp/re10k_v2/checkpoints'
   seed: 42
   num_gpus: 1
   mixed_precision: 32 #32-true, 16-mixed
   use_ema: true
+  add_mask: false
 
   optimiser:
     learning_rate: 1e-4

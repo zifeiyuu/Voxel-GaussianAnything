@@ -11,16 +11,23 @@ import os
 
 # Load configuration from GAT_config.yaml
 def load_config():
-    config_path = Path(__file__).resolve().parent.parent / 'configs' / 'GAT_config.yaml'
+    config_path = Path(__file__).resolve().parent.parent / 'configs' / 'realestate10k.yaml'
     with open(config_path, 'r') as file:
         config = yaml.safe_load(file)
     return config
 
 class pixelsplatDataset(Dataset):
-    def __init__(self):
+    def __init__(self, GAT_cfg, stage):
         # Load the configuration from YAML file
-        self.cfg = load_config()['dataset']        
-        # Load the .torch file
+        self.cfg = load_config()       
+
+        self.stage = stage
+        if stage == "train":
+            self.is_train = True
+        else:
+            self.is_train = False
+
+        self.video_mode = GAT_cfg['video_mode']
 
         self.base_dir = Path(__file__).resolve().parent.parent
         dataset_folder = Path(self.cfg['file_path'])
@@ -44,7 +51,7 @@ class pixelsplatDataset(Dataset):
                     loaded_data = torch.load(file_path)
                     self.data.extend(loaded_data) 
 
-        self.image_processor = ImageProcessor(self.cfg)
+        self.image_processor = ImageProcessor(self.cfg, self.is_train)
 
         self.frame_count = len(self.cfg['novel_frames']) + 1
         # load dilation file
@@ -56,20 +63,16 @@ class pixelsplatDataset(Dataset):
         else: # enters here when cfg.dataset.dilation = random
             self._left_offset = 0
             fixed_dilation = 0
-        if self.cfg['is_train']:
-            self.mode = 'train'
-        else:
-            self.mode = 'test'
 
         # Prepare the sequence data
         self._seq_data = {}
         for element in self.data:
             key = element['key']
             self._seq_data[key] = element
-        self._seq_keys = list(self._seq_data.keys())
+        self.seq_keys = list(self._seq_data.keys())
 
-        if self.cfg['is_train']:
-            self._seq_key_src_idx_pairs = self._full_index(self._seq_keys, 
+        if self.is_train:
+            self._seq_key_src_idx_pairs = self._full_index(self.seq_keys, 
                 self._seq_data, 
                 self._left_offset,                    # 0 when sampling dilation randomly
                 (self.frame_count-1) * fixed_dilation # 0 when sampling dilation randomly
@@ -82,7 +85,7 @@ class pixelsplatDataset(Dataset):
                 test_split_path = Path(__file__).resolve().parent / self.cfg['test_split_path']
                 self._seq_key_src_idx_pairs = self._load_split_indices(test_split_path)
             else:
-                if load_config()['eval']['video_mode']:
+                if self.video_mode:
                     self._seq_key_src_idx_pairs = self._generate_video_indices()
                 elif self.cfg['random_selection']:
                     self._seq_key_src_idx_pairs = self._generate_random_indices()
@@ -206,7 +209,7 @@ class pixelsplatDataset(Dataset):
     def __getitem__(self, index):
         # Get the sequence key and frame indices
         # print(len(self._seq_key_src_idx_pairs))
-        if self.cfg['is_train']:
+        if self.is_train:
             seq_key, src_idx = self._seq_key_src_idx_pairs[index]
             element_data = self._seq_data[seq_key]
             seq_len = len(element_data["timestamps"])
@@ -257,16 +260,17 @@ class pixelsplatDataset(Dataset):
         # Additional metadata
         input_frame_idx = src_and_tgt_frame_idxs[0]  # The source frame
         timestamp = self._seq_data[seq_key]["timestamps"][input_frame_idx]
-        inputs[("frame_id", 0)] = f"{self.mode}+{seq_key}+{timestamp}"
+        inputs[("frame_id", 0)] = f"{self.stage}+{seq_key}+{timestamp}"
         inputs[("total_frame_num", 0)] = total_frame_num
 
         return inputs
 
 class ImageProcessor:
-    def __init__(self, cfg=None):
+    def __init__(self, cfg, is_train):
         # Configuration with defaults
         self.cfg = cfg
 
+        self.is_train = is_train
         # Set image size from config
         self.image_size = (self.cfg['height'], self.cfg['width'])
         # Set the number of scales from config
@@ -302,7 +306,7 @@ class ImageProcessor:
             self.hue = 0.1
 
         # Set up color augmentation function
-        do_color_aug = self.cfg['is_train'] and random.random() > 0.5 and self.cfg['color_aug']
+        do_color_aug = self.is_train and random.random() > 0.5 and self.cfg['color_aug']
         if do_color_aug:
             self.color_aug_fn = T.ColorJitter(
                 brightness=self.brightness, 

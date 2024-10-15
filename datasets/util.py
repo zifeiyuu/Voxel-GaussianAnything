@@ -7,33 +7,17 @@ from datasets.re10k import Re10KDataset
 from datasets.nyu.dataset import NYUv2Dataset
 from datasets.kitti import KITTIDataset
 from datasets.pixelsplatDataset import pixelsplatDataset
+from datasets.scannetpp.scannetppDataset import scannetppDataset
 
-# def create_datasets(cfg, split="val"):
-#     datasets_dict = {
-#         "re10k": Re10KDataset,
-#         "nyuv2": NYUv2Dataset,
-#         "kitti": KITTIDataset,
-#     }[cfg.dataset.name]
+def create_datasets(cfg, GAT_cfg, split="val"):
 
-#     dataset = datasets_dict(cfg, split=split)
-#     logging.info("There are {:d} {} items\n".format(len(dataset), split)
-#     )
-#     shuffle = True if split == "train" else False
-#     data_loader = DataLoader(
-#         dataset,
-#         cfg.data_loader.batch_size,
-#         shuffle=shuffle,
-#         num_workers=cfg.data_loader.num_workers,
-#         pin_memory=True,
-#         drop_last=shuffle,
-#         collate_fn=custom_collate,
-#     )
+    datasets_dict = {
+        "re10k": pixelsplatDataset,
+        "scannetpp": scannetppDataset,
+    }[GAT_cfg['dataset']]
 
-#     return dataset, data_loader
-
-def create_datasets_GAT(cfg, split="val"):
-    dataset = pixelsplatDataset()
-    logging.info("There are {:d} {} items\n".format(len(dataset), split)
+    dataset = datasets_dict(GAT_cfg, split)
+    logging.info("There are {:d} {} items. Using {}\n".format(len(dataset), split, GAT_cfg['dataset'])
     )
     shuffle = True if split == "train" else False
     data_loader = DataLoader(
