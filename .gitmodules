@@ -1,3 +1,6 @@
 [submodule "UniDepth"]
 	path = submodules/UniDepth
 	url = https://github.com/lpiccinelli-eth/UniDepth.git
+[submodule "submodules/dust3r"]
+	path = submodules/dust3r
+	url = https://github.com/naver/dust3r.git
