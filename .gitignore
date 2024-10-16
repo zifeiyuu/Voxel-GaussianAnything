@@ -163,4 +163,5 @@ cython_debug/
 
 
 experiments_out
-exp/re10k_v2/checkpoints/model_re10k_v2.pth
+exp/
+output/

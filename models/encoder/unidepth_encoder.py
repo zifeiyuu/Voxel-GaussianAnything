@@ -29,9 +29,9 @@ class UniDepthExtended(nn.Module):
         # )
 
         self.unidepth = UniDepth(
-        version=cfg.model.depth.version, 
-        backbone=cfg.model.depth.backbone, 
-        pretrained=True
+            version=cfg.model.depth.version, 
+            backbone=cfg.model.depth.backbone, 
+            pretrained=True
         )
         
         print("UniDepth loaded!")
