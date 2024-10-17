@@ -5,6 +5,7 @@ import torch
 import hydra
 import torch.optim as optim
 import yaml  
+from tqdm import tqdm
 
 from ema_pytorch import EMA
 from omegaconf import DictConfig
@@ -35,15 +36,15 @@ def run_epoch(fabric,
     if fabric.is_global_zero:
         logging.info("Training on epoch {}".format(trainer.epoch))
 
-    for batch_idx, inputs in enumerate(train_loader):
+
+    for batch_idx, inputs in enumerate(tqdm(train_loader, desc="Training", total=len(train_loader))):
         # instruct the model which novel frames to render
         inputs["target_frame_ids"] = cfg.model.gauss_novel_frames
-        print("model start")
         losses, outputs = trainer(inputs)
-        print("meodel end")
         optimiser.zero_grad(set_to_none=True)
         fabric.backward(losses["loss/total"])
         optimiser.step()
+
         if ema is not None:
             ema.update()
         
@@ -52,8 +53,9 @@ def run_epoch(fabric,
         early_phase = batch_idx % trainer.cfg.run.log_frequency == 0 and step < 6000
         if fabric.is_global_zero:
             learning_rate = lr_scheduler.get_lr()
-            if type(learning_rate) is list:
+            if isinstance(learning_rate, list):
                 learning_rate = max(learning_rate)
+            
             # save the loss and scales
             trainer.log_scalars("train", outputs, losses, learning_rate)
 
@@ -67,15 +69,16 @@ def run_epoch(fabric,
                 trainer.model.save_model(optimiser, step, ema)
             # save the validation results
             early_phase = (step < 6000) and (step % 500 == 0)
-            if (early_phase or step % cfg.run.val_frequency == 0): # and step != 0:
+            if early_phase or step % cfg.run.val_frequency == 0:
                 with torch.no_grad():
                     model_eval = ema if ema is not None else trainer.model
                     trainer.validate(model_eval, evaluator, val_loader, device=fabric.device)
 
-        if (early_phase or step % cfg.run.val_frequency == 0): # and step != 0:
+        # Clean up and free GPU memory
+        if early_phase or step % cfg.run.val_frequency == 0:
             torch.cuda.empty_cache()
 
-        ## ## NOT SURE ##
+        # Clear up loss and outputs to free memory
         del losses, outputs
         torch.cuda.empty_cache()
 

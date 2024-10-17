@@ -1,6 +1,0 @@
-[2024-10-17 05:25:24,231][root][INFO] - Working dir: /mnt/ziyuxiao/code/GaussianAnything/exp/2024-10-17/05-25-17
-[2024-10-17 05:25:28,238][dinov2][INFO] - using MLP layer as FFN
-[2024-10-17 05:25:39,383][root][INFO] - There are 3512 train items. Using {'name': 'pixelsplat', 'split': 'original', 'data_path': '/mnt/datasets/realestate10k/re10k', 'depth_path': None, 'unpack_pcl_tar': False, 'preload_depths': False, 'ransac_on_the_fly': False, 'test_split_path': None, 'height': 256, 'width': 384, 'znear': 0.01, 'zfar': 100.0, 'max_fov': 100.0, 'from_tar': False, 'copy_to_local': True, 'color_aug': False, 'skip_bad_shape': True, 'dilation': 'random', 'max_dilation': 15, 'pad_border_aug': 32, 'subset': -1, 'frame_sampling_method': 'random', 'scale_pose_by_depth': False, 'test_split': 'mine', 'specific_files': ['000001', '000002'], 'random_selection': True, 'crop_border': True}
-
-[2024-10-17 05:25:59,619][xformers][WARNING] - Triton softmax kernel register spillover or invalid image caught.Deactivating this kernel, please file an issue int the xFormers repository
-[2024-10-17 05:25:59,620][xformers][WARNING] - Triton Error [CUDA]: device kernel image is invalid

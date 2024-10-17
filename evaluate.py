@@ -115,7 +115,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     out_dir = output_path / f"{now:%Y-%m-%d}_{now:%H-%M-%S}"
     out_dir.mkdir(exist_ok=True)
     spliced_images_list = []
-    for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)]):
+    for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)], desc="Evaluating"):
         if save_vis:
             print(f"saving images to: {out_dir}")
             seq_name = dataloader.dataset._seq_keys[k]

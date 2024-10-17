@@ -356,7 +356,7 @@ class pixelsplatDataset(Dataset):
             inputs[("K_src", frame_name)] = inputs_K_src
             inputs[("inv_K_src", frame_name)] = inputs_inv_K_src
             inputs[("color", frame_name, 0)] = inputs_color
-            inputs[("color_aug", frame_name, 0)] = inputs_color_aug
+            inputs[("color_aug", frame_name, 0)] = inputs_color_aug  
             # original world-to-camera matrix in row-major order and transfer to column-major order
             inputs[("T_c2w", frame_name)] = inputs_T_c2w
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
