@@ -36,12 +36,11 @@ def run_epoch(fabric,
         logging.info("Training on epoch {}".format(trainer.epoch))
 
     for batch_idx, inputs in enumerate(train_loader):
-        if batch_idx >= 2:
-            continue
         # instruct the model which novel frames to render
         inputs["target_frame_ids"] = cfg.model.gauss_novel_frames
+        print("model start")
         losses, outputs = trainer(inputs)
-
+        print("meodel end")
         optimiser.zero_grad(set_to_none=True)
         fabric.backward(losses["loss/total"])
         optimiser.step()
@@ -69,20 +68,20 @@ def run_epoch(fabric,
             # save the validation results
             early_phase = (step < 6000) and (step % 500 == 0)
             if (early_phase or step % cfg.run.val_frequency == 0): # and step != 0:
-                model_eval = ema if ema is not None else trainer.model
-                trainer.validate(model_eval, evaluator, val_loader, device=fabric.device)
+                with torch.no_grad():
+                    model_eval = ema if ema is not None else trainer.model
+                    trainer.validate(model_eval, evaluator, val_loader, device=fabric.device)
 
         if (early_phase or step % cfg.run.val_frequency == 0): # and step != 0:
             torch.cuda.empty_cache()
-            
+
+        ## ## NOT SURE ##
+        del losses, outputs
+        torch.cuda.empty_cache()
+
         trainer.step += 1
         lr_scheduler.step()
 
-def load_config():
-    config_path = Path(__file__).resolve().parent / 'configs' / 'GAT_config.yaml'
-    with open(config_path, 'r') as file:
-        config = yaml.safe_load(file)
-    return config
 
 @hydra.main(
     config_path="configs",
@@ -96,31 +95,28 @@ def main(cfg: DictConfig):
     os.chdir(output_dir)
     logging.info(f"Working dir: {output_dir}")
 
-    GAT_cfg = load_config()['train']
-
     # set up random set
     torch.set_float32_matmul_precision('high')
-    seed_everything(GAT_cfg['seed'])
+    seed_everything(cfg.run.random_seed)
 
     # set up training precision
     fabric = Fabric(
         accelerator="cuda",
-        devices = GAT_cfg['num_gpus'],
+        devices = cfg.train.num_gpus,
         strategy = DDPStrategy(find_unused_parameters=True),
-        precision = GAT_cfg['mixed_precision']
+        precision = cfg.train.mixed_precision
     )
     fabric.launch()
     fabric.barrier()
-    print("Loaded datasets")
 
     # set up model
-    trainer = Trainer(cfg, GAT_cfg)
+    trainer = Trainer(cfg)
     model = trainer.model
 
     # set up optimiser
-    optimiser = optim.Adam(model.parameters_to_train, float(GAT_cfg['optimiser']['learning_rate']))
+    optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
     def lr_lambda(*args):
-        threshold = GAT_cfg['optimiser']['scheduler_lambda_step_size']
+        threshold = cfg.optimiser.scheduler_lambda_step_size
         if trainer.step < threshold:
             return 1.0
         else:
@@ -129,7 +125,7 @@ def main(cfg: DictConfig):
         optimiser, lr_lambda
     )
 
-    if GAT_cfg['use_ema'] and fabric.is_global_zero: #Exponential Moving Average (EMA)
+    if cfg.train.ema.use and fabric.is_global_zero: #Exponential Moving Average (EMA)
         ema = EMA(  
             model, 
             beta=cfg.train.ema.beta,
@@ -144,17 +140,19 @@ def main(cfg: DictConfig):
     if (ckpt_dir := model.checkpoint_dir()).exists():
         # resume training
         model.load_model(ckpt_dir, optimiser=optimiser)
-    elif GAT_cfg['ckpt_path']:
-        model.load_model(GAT_cfg['ckpt_path'])
+        print(f"resume training using checkpoint from {ckpt_dir}")
+    elif cfg.train.load_weights_folder:
+        model.load_model(cfg.ckpt_path)
+        print(f"train using existing checkpoint from {cfg.ckpt_path}")
 
     trainer, optimiser = fabric.setup(trainer, optimiser)
     # set up dataset
-    train_dataset, train_loader = create_datasets(cfg, GAT_cfg, split="train")
+    train_dataset, train_loader = create_datasets(cfg, split="train")
     train_loader = fabric.setup_dataloaders(train_loader)
     if fabric.is_global_zero:
         # if cfg.train.logging:
         #     trainer.set_logger(setup_logger(cfg))
-        val_dataset, val_loader = create_datasets(cfg, GAT_cfg, split="train")   #########################       split="val"
+        val_dataset, val_loader = create_datasets(cfg, split="val")   #########################       split="val"
         evaluator = Evaluator()
         evaluator = fabric.to_device(evaluator)
     else:

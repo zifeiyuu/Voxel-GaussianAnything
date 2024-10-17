@@ -34,7 +34,6 @@ class UniDepthExtended(nn.Module):
         pretrained=True
         )
         
-        print("UniDepth loaded!")
 
         self.parameters_to_train = []
         if cfg.model.backbone.name == "resnet":

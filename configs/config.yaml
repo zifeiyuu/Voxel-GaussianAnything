@@ -2,8 +2,8 @@ defaults:
   - _self_
   - hydra: defaults
   - model: gaussian
-  - dataset: re10k
-  - loss: [reconstruction, regularization]  ##
+  - dataset: pixelsplat
+  - loss: [reconstruction, regularization]  ## originally only [reconstruction] loss
 
 config:
   exp_name: "debug"
@@ -14,7 +14,7 @@ data_loader:
   num_workers: 16
 
 train:
-  logging: false ##
+  logging: false 
   mixed_precision: #32-true, 16-mixed
   num_gpus: 1
   load_weights_folder:
@@ -26,7 +26,7 @@ train:
 
 optimiser:
   learning_rate: 1e-4
-  num_epochs: 3
+  num_epochs: 5
   scheduler_lambda_step_size: 60000
 
 run:
@@ -39,3 +39,38 @@ run:
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5
+
+#new
+#evaluation results save config
+save_vis: false
+video_mode: false
+original_video: true
+scene_ids: []
+output_path: ./output
+
+#ckpt path could be defined by user now
+ckpt_path: ./exp/re10k_v2/checkpoints
+
+add_mask: false #only used with depth input(scannetpp)
+
+
+# #TO RUN TRAIN with pixelsplat dataset:
+# python train.py
+
+# set video_mode: false
+# dataset.test_split_path: splits/re10k_mine_filtered/val_files.txt
+# dataset.specific_files: [] 
+
+
+
+#Things Modified:
+
+##configs.model.gauss_novel_frames: [1, 2, 3] #originally [1, 2]
+
+#File "/mnt/ziyuxiao/code/GaussianAnything/models/decoder/gauss_util.py", line 108, in render_predicted
+# if cfg.model.renderer_w_pose: SET TRUE
+
+# File "/mnt/ziyuxiao/code/GaussianAnything/models/model.py", line 211, in render_images
+#   if cfg.train.use_gt_poses: SET TRUE
+
+# cfg.dataset scale_pose_by_depth: false ??? originally true
