@@ -7,17 +7,17 @@ from datasets.re10k import Re10KDataset
 from datasets.nyu.dataset import NYUv2Dataset
 from datasets.kitti import KITTIDataset
 from datasets.pixelsplatDataset import pixelsplatDataset
-from datasets.scannetpp.scannetppDataset import scannetppDataset
+from datasets.scannetppDataset import scannetppDataset
 
-def create_datasets(cfg, GAT_cfg, split="val"):
+def create_datasets(cfg, split="val"):
 
     datasets_dict = {
-        "re10k": pixelsplatDataset,
+        "pixelsplat": pixelsplatDataset,
         "scannetpp": scannetppDataset,
-    }[GAT_cfg['dataset']]
+    }[cfg.dataset.name]
 
-    dataset = datasets_dict(GAT_cfg, split)
-    logging.info("There are {:d} {} items. Using {}\n".format(len(dataset), split, GAT_cfg['dataset'])
+    dataset = datasets_dict(cfg, split)
+    logging.info("There are {:d} {} items. Using {}\n".format(len(dataset), split, cfg.dataset)
     )
     shuffle = True if split == "train" else False
     data_loader = DataLoader(

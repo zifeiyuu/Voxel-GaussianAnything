@@ -67,7 +67,7 @@ def generate_video(model, cfg, dataloader, device=None, video_root_path= None, s
         src_frame_np = src_frame_np.astype(np.uint8)
         # Convert from RGB to BGR for OpenCV
         src_frame_np = cv2.cvtColor(src_frame_np, cv2.COLOR_RGB2BGR)
-        print(f"there are {inputs[('total_frame_num', 0)]} frames!!")
+        print(f"there are {inputs[('total_frame_num', 0)]} frames in video")
         mid_num = inputs[('total_frame_num', 0)] // 2 + 1
         ff_id = 1
         src_added = False
@@ -103,7 +103,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     
     score_dict = {}
     match cfg.dataset.name:
-        case "re10k":
+        case "pixelsplat" | "scannetpp":
             # Override the frame indices used for evaluation
             target_frame_ids = [1, 2, 3]
             eval_frames = ["src", "tgt5", "tgt10", "tgt_rand"]
@@ -115,10 +115,10 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     out_dir = output_path / f"{now:%Y-%m-%d}_{now:%H-%M-%S}"
     out_dir.mkdir(exist_ok=True)
     spliced_images_list = []
-    for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)]):
+    for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)], desc="Evaluating"):
         if save_vis:
             print(f"saving images to: {out_dir}")
-            seq_name = dataloader.dataset.seq_keys[k]
+            seq_name = dataloader.dataset._seq_keys[k]
             out_out_dir = out_dir / seq_name
             out_out_dir.mkdir(exist_ok=True)
             out_pred_dir = out_out_dir / "pred"
@@ -132,8 +132,9 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
 
         try:
             inputs = next(dataloader_iter)
+        ## not used ##
         except Exception as e:
-            if cfg.dataset.name == "re10k":
+            if cfg.dataset.name == "re10k" or cfg.dataset.name == "pixelsplat":
                 if cfg.dataset.test_split in ["pixelsplat_ctx1", "pixelsplat_ctx2", "latentsplat_ctx1", "latentsplat_ctx2"]:
                     print(f"Failed to read example {k}")
                     continue
@@ -169,6 +170,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
 
             for metric_name, v in out.items():
                 score_dict[f_id][metric_name].append(v)
+
         if spliced_images_list:
             total_image = np.vstack(spliced_images_list)  
             total_image_path = str(out_spliced_dir / f"inAll.png") 
@@ -203,12 +205,6 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
 
     return score_dict_by_name
 
-def load_config():
-    config_path = Path(__file__).resolve().parent / 'configs' / 'GAT_config.yaml'
-    with open(config_path, 'r') as file:
-        config = yaml.safe_load(file)
-    return config
-
 @hydra.main(
     config_path="configs",
     config_name="config",
@@ -221,8 +217,6 @@ def main(cfg: DictConfig):
     os.chdir(output_dir)
     print("Working dir:", output_dir)
 
-    GAT_cfg = load_config()['eval']
-
     cfg.data_loader.batch_size = 1
     cfg.data_loader.num_workers = 1
     model = GaussianPredictor(cfg)
@@ -231,31 +225,28 @@ def main(cfg: DictConfig):
 
     base_dir = Path(__file__).resolve().parent
 
-    ckpt_path = base_dir / GAT_cfg['ckpt_path']
-    ckpt_path.resolve()
+    ckpt_path = base_dir / cfg.ckpt_path
     if ckpt_path.exists():
         model.load_model(ckpt_path, ckpt_ids=0)
 
     split = "test"
-    dataset, dataloader = create_datasets(cfg, GAT_cfg, split = split)
-
-    video_mode = GAT_cfg['video_mode']
-    original_video = GAT_cfg['original_video']
-    save_vis = GAT_cfg['save_vis']
-    scene_ids = GAT_cfg['scene_ids']
-    output_path = base_dir / GAT_cfg['output_path']
-    output_path.resolve()
+    save_vis = cfg.save_vis
+    video_mode = cfg.video_mode
+    original_video = cfg.original_video
+    scene_ids = cfg.scene_ids
+    output_path = base_dir / cfg.output_path    
+    dataset, dataloader = create_datasets(cfg, split = split)
 
     if video_mode:
         generate_video(model, cfg, dataloader, device=device, video_root_path = output_path, scene_ids = scene_ids, original_video= original_video)
     else:
-        evaluator = Evaluator(crop_border=True)
+        evaluator = Evaluator(crop_border=cfg.dataset.crop_border)
         evaluator.to(device)
 
         score_dict_by_name = evaluate(model, cfg, evaluator, dataloader, 
                                     device=device, save_vis=save_vis, output_path = output_path)
         print(json.dumps(score_dict_by_name, indent=4))
-        if cfg.dataset.name=="re10k":
+        if cfg.dataset.name=="re10k" or cfg.dataset.name=="pixelsplat":
             with open("metrics_{}_{}_{}.json".format(cfg.dataset.name, split, cfg.dataset.test_split), "w") as f:
                 json.dump(score_dict_by_name, f, indent=4)
         with open("metrics_{}_{}.json".format(cfg.dataset.name, split), "w") as f:

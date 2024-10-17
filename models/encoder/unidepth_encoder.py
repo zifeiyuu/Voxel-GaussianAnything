@@ -34,7 +34,6 @@ class UniDepthExtended(nn.Module):
             pretrained=True
         )
         
-        print("UniDepth loaded!")
 
         self.parameters_to_train = []
         if cfg.model.backbone.name == "resnet":
@@ -81,7 +80,7 @@ class UniDepthExtended(nn.Module):
         outputs_gauss = {}
         # print(inputs[("K_src", 0)].shape)
         outputs_gauss[("K_src", 0)] = inputs[("K_src", 0)] if ("K_src", 0) in inputs.keys() else depth_outs["intrinsics"]
-        outputs_gauss[("inv_K_src", 0)] = torch.linalg.inv(outputs_gauss[("K_src", 0)])
+        outputs_gauss[("inv_K_src", 0)] = torch.linalg.inv(outputs_gauss[("K_src", 0)].float())
 
         if self.cfg.model.backbone.depth_cond:
             # division by 20 is to put depth in a similar range to RGB

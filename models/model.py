@@ -240,7 +240,7 @@ class GaussianPredictor(nn.Module):
                     focals_pixels = torch.diag(K_tgt[b])[:2]
                     fovY = focal2fov(focals_pixels[1].item(), H)
                     fovX = focal2fov(focals_pixels[0].item(), W)
-                    if cfg.dataset.name in ["co3d", "re10k", "mixed"]:
+                    if cfg.dataset.name in ["co3d", "re10k", "mixed", "pixelsplat"]:
                         px_NDC, py_NDC = 0, 0
                     else:
                         px_NDC, py_NDC = K_to_NDC_pp(Kx=K_tgt[b][0, 2], Ky=K_tgt[b][1, 2], H=H, W=W)

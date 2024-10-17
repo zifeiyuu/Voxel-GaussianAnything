@@ -12,46 +12,75 @@ import logging
 import json
 import cv2
 
-from src.splatt3r_src.loss_mask import calculate_in_frustum_mask_single
+from datasets.scannetpp.masks import calculate_in_frustum_mask_single
+from datasets.data import process_projs, data_to_c2w, pil_loader, get_sparse_depth
 
 logger = logging.getLogger(__name__)
 
-# Load configuration from GAT_config.yaml
-def load_config():
-    config_path = Path(__file__).resolve().parent.parent.parent / 'configs' / 'scannetpp.yaml'
-    with open(config_path, 'r') as file:
-        config = yaml.safe_load(file)
-    return config
-
 class scannetppDataset(Dataset):
-    def __init__(self, GAT_cfg, stage):
-        self.cfg = load_config()  
+    def __init__(self, cfg, split):
+        self.cfg = cfg
 
-        self.stage = stage
-        if stage == "train":
-            self.is_train = True
-        else:
-            self.is_train = False
+        self.dataset_folder = Path(self.cfg.dataset.data_path)
+        # if this is a relative path to the code dir, make it absolute
+        if not self.dataset_folder.is_absolute(): 
+            code_dir = Path(__file__).parents[1]
+            relative_path = self.dataset_folder
+            self.dataset_folder = code_dir / relative_path
+            if not self.dataset_folder.exists():
+                raise FileNotFoundError(f"Relative path {relative_path} does not exist")
+        elif not self.dataset_folder.exists():
+            raise fileNotFoundError(f"Absolute path {self.dataset_folder} does not exist")
+        self.dataset_folder = self.dataset_folder.resolve()
 
-        self.video_mode = GAT_cfg['video_mode']
-        #Scannet dataset folder root
-        self.root = Path(self.cfg['file_path'])
-        self.root = self.root.resolve()
-        specific_files = self.cfg.get('specific_files', []) 
+        self.split = split
+        self.image_size = (self.cfg.dataset.height, self.cfg.dataset.width)
+        self.color_aug = self.cfg.dataset.color_aug
+        # Padding function if border augmentation is required
+        if self.cfg.dataset.pad_border_aug != 0:
+            self.pad_border_fn = T.Pad((self.cfg.dataset.pad_border_aug, self.cfg.dataset.pad_border_aug))
+        self.num_scales = len(cfg.model.scales)
+        self.novel_frames = list(cfg.model.gauss_novel_frames)
+        self.frame_count = len(self.novel_frames) + 1
+        self.max_fov = cfg.dataset.max_fov
+        self.interp = Image.LANCZOS
+        # self.loader = pil_loader
+        self.to_tensor = T.ToTensor()
 
-        self.image_processor = ImageProcessor(self.cfg, self.is_train)
+        self.is_train = self.split == "train"
 
-        self.frame_count = len(self.cfg['novel_frames']) + 1
+        specific_files = self.cfg.dataset.get('specific_files', []) 
+
+        try:
+            # Newer version with tuple ranges
+            self.brightness = (0.8, 1.2)
+            self.contrast = (0.8, 1.2)
+            self.saturation = (0.8, 1.2)
+            self.hue = (-0.1, 0.1)
+        except TypeError:
+            # Fallback for older versions
+            self.brightness = 0.2
+            self.contrast = 0.2
+            self.saturation = 0.2
+            self.hue = 0.1
+
+        self.resize = {}
+        for i in range(self.num_scales):
+            s = 2 ** i
+            new_size = (self.image_size[0] // s, self.image_size[1] // s)
+            self.resize[i] = T.Resize(new_size, interpolation=self.interp)
+        
         # load dilation file
-        self.dilation = self.cfg['dilation']
-        self.max_dilation = self.cfg['max_dilation']
+        self.dilation = cfg.dataset.dilation
+        self.max_dilation = cfg.dataset.max_dilation
         if isinstance(self.dilation, int):
-            self._left_offset = ((self.frame_count - 1) // 2) * self.dilation
+            self._left_offset = ((self.frame_count - 1) // 2) * self.dilation ######
             fixed_dilation = self.dilation
         else: # enters here when cfg.dataset.dilation = random
             self._left_offset = 0
             fixed_dilation = 0
-        self.png_depth_scale = 1000.0
+
+        self.png_depth_scale = cfg.dataset.png_depth_scale 
 
         # Dictionaries to store the data for each scene
         self.color_paths = {}
@@ -61,25 +90,24 @@ class scannetppDataset(Dataset):
 
         # Fetch the seq_keys to use
         if specific_files:
-            self.seq_keys = specific_files
+            self._seq_keys = specific_files
         else:
-            if self.stage == "train":
-                sequence_file = os.path.join(self.root, "raw", "splits", "nvs_sem_train.txt")
+            if self.split == "train":
+                sequence_file = os.path.join(self.dataset_folder, "raw", "splits", "nvs_sem_train.txt")
                 bad_scenes = ['303745abc7']
-            elif self.stage == "val" or self.stage == "test":
-                sequence_file = os.path.join(self.root, "raw", "splits", "nvs_sem_val.txt")
+            elif self.split == "val" or self.split == "test":
+                sequence_file = os.path.join(self.dataset_folder, "raw", "splits", "nvs_sem_val.txt")
                 bad_scenes = ['cc5237fd77']
             with open(sequence_file, "r") as f:
-                self.seq_keys = f.read().splitlines()
+                self._seq_keys = f.read().splitlines()
             logger.info(f"Removing scenes that have frames with no valid depths: {bad_scenes}")
-            self.seq_keys = [s for s in self.seq_keys if s not in bad_scenes]
+            self._seq_keys = [s for s in self._seq_keys if s not in bad_scenes]
 
         # Collect information for every sequence
         scenes_with_no_good_frames = []
-        for key in self.seq_keys:
-
-            input_raw_folder = os.path.join(self.root, 'raw', 'data', key)
-            input_processed_folder = os.path.join(self.root, 'processed', 'data', key)
+        for key in self._seq_keys:
+            input_raw_folder = os.path.join(self.dataset_folder, 'raw', 'data', key)
+            input_processed_folder = os.path.join(self.dataset_folder, 'processed', 'data', key)
 
             # Load Train & Test Splits
             frame_file = os.path.join(input_raw_folder, "dslr", "train_test_lists.json")
@@ -144,20 +172,20 @@ class scannetppDataset(Dataset):
             self.intrinsics[key] = K
 
         # Remove scenes with no good frames
-        self.seq_keys = [s for s in self.seq_keys if s not in scenes_with_no_good_frames]
+        self._seq_keys = [s for s in self._seq_keys if s not in scenes_with_no_good_frames]
 
-        if self.is_train and not self.video_mode:
+        if self.is_train:
             self._seq_key_src_idx_pairs = self._full_index(
                 self._left_offset,                    # 0 when sampling dilation randomly
                 (self.frame_count-1) * fixed_dilation # 0 when sampling dilation randomly
             )
-            if self.cfg['subset'] != -1: # use cfg.subset source frames, they might come from the same sequence
+            if self.cfg.dataset.subset != -1: # use cfg.subset source frames, they might come from the same sequence
                 self._seq_key_src_idx_pairs = self._seq_key_src_idx_pairs[:self.cfg['subset']] * (len(self._seq_key_src_idx_pairs) // self.cfg['subset']) 
         else:
             #generate indices based on the strategy
-            if self.video_mode:
+            if self.cfg.video_mode:
                 self._seq_key_src_idx_pairs = self._generate_video_indices()
-            elif self.cfg['random_selection']:
+            elif self.cfg.dataset.random_selection:
                 self._seq_key_src_idx_pairs = self._generate_random_indices()
             else:
                 self._seq_key_src_idx_pairs = self._generate_defined_indices(-30, 30)
@@ -168,7 +196,7 @@ class scannetppDataset(Dataset):
             # fn = self.data_path / "valid_seq_ids.train.pickle.gz"
             # valid_seq_ids = pickle.load(gzip.open(fn, "rb"))
         key_id_pairs = []
-        for key in self.seq_keys:
+        for key in self._seq_keys:
             seq_len = len(self.color_paths[key])
             frame_ids = [i + left_offset for i in range(seq_len - extra_frames)]
             # if skip_bad:
@@ -181,7 +209,7 @@ class scannetppDataset(Dataset):
     def _generate_random_indices(self):
         """Generate random frame indices for testing."""
         key_id_pairs = []
-        for key in self.seq_keys:
+        for key in self._seq_keys:
             seq_len = len(self.color_paths[key])
             if seq_len < 4:
                 continue  # Skip if there are not enough frames
@@ -195,7 +223,7 @@ class scannetppDataset(Dataset):
         """Generate default frame indices: (random, random+gap1, random+gap2, random)."""
         key_id_pairs = []
         
-        for key in self.seq_keys:
+        for key in self._seq_keys:
             seq_len = len(self.color_paths[key])
 
             # Ensure gaps are not zero
@@ -241,7 +269,7 @@ class scannetppDataset(Dataset):
     def _generate_video_indices(self):
         """Generate indices such that the middle frame is the source, and all other frames are targets."""
         key_id_pairs = []
-        for key in self.seq_keys:
+        for key in self._seq_keys:
             seq_len = len(self.color_paths[key])
             if seq_len < 2:
                 continue  # Skip if there are not enough frames
@@ -260,109 +288,9 @@ class scannetppDataset(Dataset):
         # Return the total number of frame sets in the dataset
         return len(self._seq_key_src_idx_pairs)
 
-    def __getitem__(self, index):
-        # Get the sequence key and frame indices
-        # print(len(self._seq_key_src_idx_pairs))
-        if self.is_train:
-            seq_key, src_idx = self._seq_key_src_idx_pairs[index]
-            seq_len = len(self.color_paths[seq_key])
-
-            if self.cfg['frame_sampling_method'] == "two_forward_one_back":
-                if self.dilation == "random":
-                    dilation = torch.randint(1, self.max_dilation, (1,)).item()
-                    left_offset = dilation 
-                else:
-                    dilation = self.dilation
-                    left_offset = self._left_offset
-                src_and_tgt_frame_idxs = [src_idx - left_offset + i * dilation for i in range(self.frame_count)]
-                src_and_tgt_frame_idxs = [src_idx] + [max(min(i, seq_len-1), 0) for i in src_and_tgt_frame_idxs if i != src_idx]
-            elif self.cfg['frame_sampling_method'] == "random":
-                target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
-                src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]                
-        else:
-            seq_key, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
-
-        total_frame_num = len(src_and_tgt_frame_idxs)
-        frame_names = list(range(total_frame_num))
-
-        inputs = {}
-
-        # Iterate over the frames and process each frame
-        for frame_name, frame_idx in zip(frame_names, src_and_tgt_frame_idxs):
-            # Process the intrinsic and pose for the current frame
-            c2w = self.c2ws[seq_key][frame_idx]
-            inputs_T_c2w = self.image_processor.process_pose(c2w)
-
-            intrinsic = self.intrinsics[seq_key]
-            inputs_K_tgt, inputs_K_src, inputs_inv_K_src = self.image_processor.process_intrinsics(intrinsic)
-            
-            # Process the image for the current frame
-            img_path = self.color_paths[seq_key][frame_idx]
-            inputs_color, inputs_color_aug = self.image_processor.process_image(img_path)
-
-            depth_path = self.depth_paths[seq_key][frame_idx]
-            inputs_depth = self.image_processor.process_depth(depth_path)
-
-            # Prepare the inputs dictionary
-            inputs[("K_tgt", frame_name)] = inputs_K_tgt
-            inputs[("K_src", frame_name)] = inputs_K_src
-            inputs[("inv_K_src", frame_name)] = inputs_inv_K_src
-            inputs[("color", frame_name, 0)] = inputs_color
-            inputs[("color_aug", frame_name, 0)] = inputs_color_aug
-            inputs[("depth", frame_name, 0)] = inputs_depth
-            inputs[("T_c2w", frame_name)] = inputs_T_c2w
-            inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
-
-        # Additional metadata
-        input_frame_idx = src_and_tgt_frame_idxs[0]  # The source frame
-        input_img_name = self.color_paths[seq_key][input_frame_idx]
-        inputs[("frame_id", 0)] = f"{self.stage}+{seq_key}+{input_img_name}"
-        inputs[("total_frame_num", 0)] = total_frame_num
-
-        return inputs
-
-class ImageProcessor:
-    def __init__(self, cfg, is_train):
-        # Configuration with defaults
-        self.cfg = cfg
-
-        self.is_train = is_train
-        # Set image size from config
-        self.image_size = (self.cfg['height'], self.cfg['width'])
-        # Set the number of scales from config
-        self.num_scales = len(self.cfg['scales'])
-        # Define resize transformations based on scales
-        self.resize = {}
-        for i in range(self.num_scales):
-            s = 2 ** i
-            new_size = (self.image_size[0] // s, self.image_size[1] // s)
-            self.resize[i] = T.Resize(new_size, interpolation=T.InterpolationMode.BILINEAR)
-
-        # To tensor transformation
-        self.to_tensor = T.ToTensor()
-
-        # Padding function if border augmentation is required
-        if self.cfg['pad_border_aug'] != 0:
-            self.pad_border_fn = T.Pad((self.cfg['pad_border_aug'], self.cfg['pad_border_aug']))
-        else:
-            self.pad_border_fn = lambda x: x  # No padding if augmentation is 0
-
-        # Set up brightness, contrast, saturation, and hue for color augmentation
-        try:
-            # Newer version with tuple ranges
-            self.brightness = (0.8, 1.2)
-            self.contrast = (0.8, 1.2)
-            self.saturation = (0.8, 1.2)
-            self.hue = (-0.1, 0.1)
-        except TypeError:
-            # Fallback for older versions
-            self.brightness = 0.2
-            self.contrast = 0.2
-            self.saturation = 0.2
-            self.hue = 0.1
-
+    def process_image(self, img_path):
         # Set up color augmentation function
-        do_color_aug = self.is_train and random.random() > 0.5 and self.cfg['color_aug']
+        do_color_aug = self.is_train and random.random() > 0.5 and self.color_aug
         if do_color_aug:
             self.color_aug_fn = T.ColorJitter(
                 brightness=self.brightness, 
@@ -373,7 +301,6 @@ class ImageProcessor:
         else:
             self.color_aug_fn = (lambda x: x)
 
-    def process_image(self, img_path):
         options=cv2.IMREAD_COLOR
         if img_path.endswith(('.exr', 'EXR')):
             options = cv2.IMREAD_ANYDEPTH
@@ -390,7 +317,7 @@ class ImageProcessor:
         inputs_color = self.to_tensor(img_scale)
 
         # Apply padding and color augmentation if needed
-        if self.cfg['pad_border_aug'] != 0:
+        if self.cfg.dataset.pad_border_aug != 0:
             inputs_color_aug = self.to_tensor(self.color_aug_fn(self.pad_border_fn(img_scale)))
         else:
             inputs_color_aug = self.to_tensor(self.color_aug_fn(img_scale))
@@ -427,8 +354,8 @@ class ImageProcessor:
         K_scale_source = K.copy()
         K_scale_source[0, 0] *= self.image_size[1]
         K_scale_source[1, 1] *= self.image_size[0]
-        K_scale_source[0, 2] *= (self.image_size[1] + self.cfg['pad_border_aug'] * 2)
-        K_scale_source[1, 2] *= (self.image_size[0] + self.cfg['pad_border_aug'] * 2)
+        K_scale_source[0, 2] *= (self.image_size[1] + self.cfg.dataset.pad_border_aug * 2)
+        K_scale_source[1, 2] *= (self.image_size[0] + self.cfg.dataset.pad_border_aug * 2)
 
         # Compute the inverse of the scaled source intrinsic matrix
         inv_K_source = np.linalg.pinv(K_scale_source)
@@ -440,6 +367,68 @@ class ImageProcessor:
 
         return inputs_K_scale_target, inputs_K_scale_source, inputs_inv_K_source
     
+    def __getitem__(self, index):
+        # Get the sequence key and frame indices
+        if self.is_train:
+            seq_key, src_idx = self._seq_key_src_idx_pairs[index]
+            seq_len = len(self.color_paths[seq_key])
+
+            if self.cfg.dataset.frame_sampling_method == "two_forward_one_back":
+                if self.dilation == "random":
+                    dilation = torch.randint(1, self.max_dilation, (1,)).item()
+                    left_offset = dilation 
+                else:
+                    dilation = self.dilation
+                    left_offset = self._left_offset
+                src_and_tgt_frame_idxs = [src_idx - left_offset + i * dilation for i in range(self.frame_count)]
+                src_and_tgt_frame_idxs = [src_idx] + [max(min(i, seq_len-1), 0) for i in src_and_tgt_frame_idxs if i != src_idx]
+            elif self.cfg.dataset.frame_sampling_method  == "random":
+                target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
+                src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]                
+        else:
+            seq_key, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
+
+        total_frame_num = len(src_and_tgt_frame_idxs)
+        frame_names = list(range(total_frame_num))
+
+        inputs = {}
+
+        # Iterate over the frames and process each frame
+        for frame_name, frame_idx in zip(frame_names, src_and_tgt_frame_idxs):
+            # Process the intrinsic and pose for the current frame
+            c2w = self.c2ws[seq_key][frame_idx]
+            inputs_T_c2w = self.process_pose(c2w)
+
+            intrinsic = self.intrinsics[seq_key]
+            inputs_K_tgt, inputs_K_src, inputs_inv_K_src = self.process_intrinsics(intrinsic)
+            
+            # Process the image for the current frame
+            img_path = self.color_paths[seq_key][frame_idx]
+            inputs_color, inputs_color_aug = self.process_image(img_path)
+
+            depth_path = self.depth_paths[seq_key][frame_idx]
+            inputs_depth = self.process_depth(depth_path)
+
+            # Additional metadata
+            input_frame_idx = src_and_tgt_frame_idxs[0]  # The source frame
+            input_img_name = self.color_paths[seq_key][input_frame_idx]
+            inputs[("frame_id", 0)] = f"{self.split}+{seq_key}+{input_img_name}"
+            
+            # Prepare the inputs dictionary
+            inputs[("K_tgt", frame_name)] = inputs_K_tgt
+            inputs[("K_src", frame_name)] = inputs_K_src
+            inputs[("inv_K_src", frame_name)] = inputs_inv_K_src
+            inputs[("color", frame_name, 0)] = inputs_color
+            inputs[("color_aug", frame_name, 0)] = inputs_color_aug
+            inputs[("depth", frame_name, 0)] = inputs_depth
+            inputs[("T_c2w", frame_name)] = inputs_T_c2w
+            inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
+
+        inputs[("total_frame_num", 0)] = total_frame_num
+
+        return inputs
+
+
     # def get_view(self, sequence, view_idx, resolution):
 
     #     # RGB Image

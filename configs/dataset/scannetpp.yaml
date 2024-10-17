@@ -1,0 +1,38 @@
+name: scannetpp
+split: original
+data_path: '/mnt/ziyuxiao/code/scannetpp/data/scannetpp_demo'
+depth_path: #None
+unpack_pcl_tar: false
+preload_depths: false
+ransac_on_the_fly: false
+test_split_path: #splits/re10k_mine_filtered/val_files.txt
+
+height: 256
+width: 384
+
+znear: 0.01
+zfar: 100.0
+max_fov: 100.0
+
+from_tar: false
+copy_to_local: true
+color_aug: false
+skip_bad_shape: true
+dilation: random
+max_dilation: 15 #choose random target frame, maximum gap
+pad_border_aug: 32
+subset: -1  # use subset frames for small set overfitting
+
+frame_sampling_method: random
+scale_pose_by_depth: false   ###################### originally true
+test_split: mine
+
+#new
+specific_files: ['0a5c013435'] 
+random_selection: true
+
+#probably used to exclude the outer edges of the image？
+#In original evaluation.py file but not in original config, bug?
+crop_border: true
+
+png_depth_scale: 1000.0 #only for scannetpp
