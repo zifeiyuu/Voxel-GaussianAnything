@@ -10,7 +10,7 @@ from models.decoder.resnet_decoder import ResnetDecoder, ResnetDepthDecoder
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 
-unidepth_path = os.path.join(base_dir, 'UniDepth')
+unidepth_path = os.path.join(base_dir, 'submodules/UniDepth')
 
 sys.path.append(unidepth_path)
 
@@ -29,9 +29,9 @@ class UniDepthExtended(nn.Module):
         # )
 
         self.unidepth = UniDepth(
-        version=cfg.model.depth.version, 
-        backbone=cfg.model.depth.backbone, 
-        pretrained=True
+            version=cfg.model.depth.version, 
+            backbone=cfg.model.depth.backbone, 
+            pretrained=True
         )
         
 

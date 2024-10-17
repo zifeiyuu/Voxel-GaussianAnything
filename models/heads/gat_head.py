@@ -1,0 +1,39 @@
+import torch
+import torch.nn as nn
+import numpy as np
+from einops import rearrange
+from collections import OrderedDict
+from ..decoder.gaussian_decoder import GaussianDecoder, get_splits_and_inits
+
+class LinearHead(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+
+        self.cfg = cfg
+        self.in_dim = cfg.model.backbone.pts_feat_dim
+
+        self.split_dimensions, scales, biases = get_splits_and_inits(cfg)
+        self.num_output_channels = sum(self.split_dimensions)
+
+        # decoder
+        self.gaussian_head = nn.Linear(self.in_dim + 3, self.num_output_channels)
+
+        # gaussian parameters initialisation
+        start_channel = 0
+        for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
+            nn.init.xavier_uniform_(
+                self.gaussian_head.weight[start_channel:start_channel+out_channel,
+                                :, :, :], scale)
+            nn.init.constant_(
+                self.gaussian_head.bias[start_channel:start_channel+out_channel], bias)
+            start_channel += out_channel
+
+        # gaussian parameters activation
+        self.gaussian_decoder = GaussianDecoder(cfg)
+    
+    def forward(self, pts3d):
+        x = self.gaussian_head(pts3d)
+        out = self.gaussian_decoder(x, self.split_dimensions)
+
+        return out
+

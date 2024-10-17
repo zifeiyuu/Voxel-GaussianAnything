@@ -1,0 +1,164 @@
+import torch
+import logging
+import time
+import torch.nn as nn
+
+from pathlib import Path
+from einops import rearrange
+
+from models.encoder.layers import BackprojectDepth
+from models.decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
+from misc.util import add_source_frame_id
+from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
+
+def default_param_group(model):
+    return [{'params': model.parameters()}]
+
+
+def to_device(inputs, device):
+    for key, ipt in inputs.items():
+        if isinstance(ipt, torch.Tensor):
+            inputs[key] = ipt.to(device)
+    return inputs
+
+
+class BaseModel(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+
+        self.cfg = cfg
+        # checking height and width are multiples of 32
+        assert cfg.dataset.width % 32 == 0 and cfg.dataset.height % 32 == 0, "'width' and 'height' must be a multiple of 32"
+
+        self.parameters_to_train = []
+
+    def target_frame_ids(self, inputs):
+        return inputs["target_frame_ids"]
+    
+    def all_frame_ids(self, inputs):
+        return add_source_frame_id(self.target_frame_ids(inputs))
+
+    def set_train(self):
+        """Convert all models to training mode
+        """
+        for m in self.models.values():
+            m.train()
+        self._is_train = True
+
+    def set_eval(self):
+        """Convert all models to testing/evaluation mode
+        """
+        for m in self.models.values():
+            m.eval()
+        self._is_train = False
+
+    def is_train(self):
+        return self._is_train
+    
+    @torch.no_grad()
+    def process_gt_poses(self, inputs, outputs):
+        cfg = self.cfg
+        keyframe = 0
+        for f_i in self.target_frame_ids(inputs):
+            if ("T_c2w", f_i) not in inputs:
+                continue
+            T_0 = inputs[("T_c2w", keyframe)]
+            T_i = inputs[("T_c2w", f_i)]
+            if ("T_w2c", keyframe) in inputs.keys():
+                T_0_inv = inputs[("T_w2c", keyframe)]
+            else:
+                T_0_inv = torch.linalg.inv(T_0.float())
+            if ("T_w2c", f_i) in inputs.keys():
+                T_i_inv = inputs[("T_w2c", f_i)]
+            else:
+                T_i_inv = torch.linalg.inv(T_i.float())
+
+            if T_i_inv.dtype == torch.float16 and T_0.dtype == torch.float16:
+                outputs[("cam_T_cam", 0, f_i)] = (T_i_inv @ T_0).half()
+            else:
+                outputs[("cam_T_cam", 0, f_i)] = T_i_inv @ T_0
+            if T_0_inv.dtype == torch.float16 and T_i.dtype == torch.float16:
+                outputs[("cam_T_cam", f_i, 0)] = (T_0_inv @ T_i).half()
+            else:
+                outputs[("cam_T_cam", f_i, 0)] = T_0_inv @ T_i
+
+
+        if cfg.dataset.scale_pose_by_depth:
+            B = cfg.data_loader.batch_size
+            depth_padded = outputs[("depth", 0)].detach()
+            # only use the depth in the unpadded image for scale estimation
+            depth = depth_padded[:, :, 
+                                 self.cfg.dataset.pad_border_aug:depth_padded.shape[2]-self.cfg.dataset.pad_border_aug,
+                                 self.cfg.dataset.pad_border_aug:depth_padded.shape[3]-self.cfg.dataset.pad_border_aug]
+            sparse_depth = inputs[("depth_sparse", 0)]
+            
+            scales = []
+            for k in range(B):
+                depth_k = depth[[k * self.cfg.model.gaussians_per_pixel], ...]
+                sparse_depth_k = sparse_depth[k]
+                if ("scale_colmap", 0) in inputs.keys():
+                    scale = inputs[("scale_colmap", 0)][k]
+                else:
+                    if self.is_train():
+                        scale = estimate_depth_scale(depth_k, sparse_depth_k)
+                    else:
+                        scale = estimate_depth_scale_ransac(depth_k, sparse_depth_k)
+                scales.append(scale)
+            scale = torch.tensor(scales, device=depth.device).unsqueeze(dim=1)
+            outputs[("depth_scale", 0)] = scale
+
+            for f_i in self.target_frame_ids(inputs):
+                T = outputs[("cam_T_cam", 0, f_i)]
+                T[:, :3, 3] = T[:, :3, 3] * scale
+                outputs[("cam_T_cam", 0, f_i)] = T
+                T = outputs[("cam_T_cam", f_i, 0)]
+                T[:, :3, 3] = T[:, :3, 3] * scale
+                outputs[("cam_T_cam", f_i, 0)] = T
+
+    def checkpoint_dir(self):
+        return Path("checkpoints")
+
+    def save_model(self, optimiser, step, ema=None):
+        """save model weights to disk"""
+        save_folder = self.checkpoint_dir()
+        save_folder.mkdir(exist_ok=True, parents=True)
+
+        save_path = save_folder / f"model_{step:07}.pth"
+        logging.info(f"saving checkpoint to {str(save_path)}")
+
+        model = ema.ema_model if ema is not None else self
+        save_dict = {
+            "model": model.state_dict(),
+            "version": "1.0",
+            "optimiser": optimiser.state_dict(),
+            "step": step
+        }
+        torch.save(save_dict, save_path)
+
+        num_ckpts = self.cfg.run.num_keep_ckpts
+        ckpts = sorted(list(save_folder.glob("model_*.pth")), reverse=True)
+        if len(ckpts) > num_ckpts:
+            for ckpt in ckpts[num_ckpts:]:
+                ckpt.unlink()
+
+    def load_model(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0):
+        """load model(s) from disk"""
+        weights_path = Path(weights_path)
+
+        if weights_path.is_dir():
+            ckpts = sorted(list(weights_path.glob("model_*.pth")), reverse=True)
+            weights_path = ckpts[ckpt_ids]
+        logging.info(f"Loading weights from {weights_path}...")
+        state_dict = torch.load(weights_path, map_location=torch.device(device))
+        new_dict = {}
+        for k, v in state_dict["model"].items():
+            if "backproject_depth" in k:
+                new_dict[k] = self.state_dict()[k].clone()
+            else:
+                new_dict[k] = v.clone()
+        self.load_state_dict(new_dict, strict=False)
+        
+        # loading adam state
+        if optimiser is not None:
+            optimiser.load_state_dict(state_dict["optimiser"])
+            self.step = state_dict["step"]
