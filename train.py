@@ -37,7 +37,8 @@ def run_epoch(fabric,
         logging.info("Training on epoch {}".format(trainer.epoch))
 
 
-    for batch_idx, inputs in enumerate(tqdm(train_loader, desc="Training", total=len(train_loader))):
+    for batch_idx, inputs in enumerate(tqdm(train_loader, desc="Training", 
+                                            total=len(train_loader), dynamic_ncols=True)):
         # instruct the model which novel frames to render
         inputs["target_frame_ids"] = cfg.model.gauss_novel_frames
         losses, outputs = trainer(inputs)

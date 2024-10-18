@@ -10,14 +10,35 @@ from .resnet_encoder import ResnetEncoder
 from ..decoder.resnet_decoder import ResnetDecoder, ResnetDepthDecoder
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-
 dust3r_path = os.path.join(base_dir, 'submodules/dust3r')
-
-sys.path.append(dust3r_path)
-
+sys.path.insert(0, dust3r_path)
 from dust3r.model import AsymmetricCroCo3DStereo
+sys.path.pop(0)
+
+mast3r_path = os.path.join(base_dir, 'submodules/mast3r')
+sys.path.insert(0, mast3r_path)
+from mast3r.model import AsymmetricMASt3R
+sys.path.pop(0)
 
 from IPython import embed
+
+def freeze_all_params(modules):
+    if isinstance(modules, list) or isinstance(modules, tuple):
+        for module in modules:
+            try:
+                for n, param in module.named_parameters():
+                    param.requires_grad = False
+            except AttributeError:
+                # module is directly a parameter
+                module.requires_grad = False
+    else:
+        assert isinstance(modules, nn.Module)
+        try:
+            for n, param in modules.named_parameters():
+                param.requires_grad = False
+        except AttributeError:
+            # module is directly a parameter
+            modules.requires_grad = False
 
 
 class Dust3rEncoder(nn.Module):
@@ -25,37 +46,73 @@ class Dust3rEncoder(nn.Module):
         super().__init__()
 
         self.cfg = cfg
-        self.pts_feat_dim = 32
+        self.pts_feat_dim = cfg.model.backbone.pts_feat_dim
+        version = cfg.model.backbone.version
 
         # hardcoding the model name for now
-        model_name = "DUSt3R_ViTLarge_BaseDecoder_512_dpt"
-        self.dust3r = AsymmetricCroCo3DStereo.from_pretrained(f"naver/{model_name}")
-        
-        print("DUSt3R loaded!")
+        if "dust3r" in version:
+            model_name = "DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+            self.dust3r = AsymmetricCroCo3DStereo.from_pretrained(f"naver/{model_name}")
+            print("DUSt3R loaded!")
+        elif "mast3r" in version:
+            model_name = "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
+            self.dust3r = AsymmetricMASt3R.from_pretrained(f"naver/{model_name}")
+            print("MASt3R loaded!")
+        else:
+            raise ValueError(f"Unknown version of Dust3r: {version}")
 
         self.parameters_to_train = []
-        # only train encoder and patch_embed
-        self.parameters_to_train += [{"params": self.dust3r.patch_embed.parameters()},
-                                     {"params": self.dust3r.enc_blocks.parameters()}]
+        all_dust3r_modules = [
+            "patch_embed",
+            "enc_blocks",
+            "enc_norm",
+            "decoder_embed",
+            "dec_blocks",
+            "dec_norm",
+            "downstream_head1",
+            "downstream_head2"
+        ]
+        modules_to_delete = ["downstream_head2", "prediction_head"]
+        modules_to_freeze = ["patch_embed"]
         
         enc_dim = self.dust3r.enc_embed_dim
+        self.patch_size = self.dust3r.patch_embed.patch_size[0]
 
-        self.use_dust3r_decoder = True
-        if self.use_dust3r_decoder:
-            self.parameters_to_train += [{"params": self.dust3r.dec_blocks.parameters()}]
-            
-        else:
-            self.proj1 = nn.Linear(enc_dim, self.dust3r.dec_embed_dim)
-            self.parameters_to_train += [{"params": self.proj1.parameters()}]
+        self.use_dust3r_decoder = cfg.model.backbone.use_dust3r_decoder
+        if not self.use_dust3r_decoder:
+            modules_to_delete += [
+                "decoder_embed",
+                "dec_blocks",
+                "dec_norm",
+                "downstream_head1"
+            ]
 
-        patch_size = self.dust3r.patch_embed.patch_size
-        self.pts_head = nn.Sequential(
-            nn.Linear(self.dust3r.dec_embed_dim, 3 * patch_size**2)
+            self.pts_head = nn.Sequential(
+                nn.Linear(enc_dim, 3 * self.patch_size**2)
+            )
+            self.parameters_to_train += [{"params": self.pts_head.parameters()}]
+
+        self.pts_feat_head = nn.Sequential(
+            nn.Linear(enc_dim, self.pts_feat_dim * self.patch_size**2)
         )
-        self.pts_feat_dim = nn.Sequential(
-            nn.Linear(self.dust3r.dec_embed_dim, self.pts_feat_dim * patch_size**2)
-        )
-        
+        self.parameters_to_train += [{"params": self.pts_feat_head.parameters()}]
+
+        # freeze ,delete and add modules
+        if cfg.model.backbone.freeze_encoder:
+            modules_to_freeze += ["enc_blocks", "enc_norm"]
+        if cfg.model.backbone.freeze_decoder:
+            modules_to_freeze += ["decoder_embed", "dec_blocks", "dec_norm"]
+        if cfg.model.backbone.freeze_head:
+            modules_to_freeze += ["downstream_head1"]
+
+        for module in all_dust3r_modules:
+            if module in modules_to_delete:
+                delattr(self.dust3r, module)
+            elif module in modules_to_freeze:
+                freeze_all_params(getattr(self.dust3r, module))
+            else:
+                self.parameters_to_train += [{"params": getattr(self.dust3r, module).parameters()}]
+
     def get_parameter_groups(self):
         return self.parameters_to_train
     
@@ -69,17 +126,18 @@ class Dust3rEncoder(nn.Module):
         if self.use_dust3r_decoder:
             # get the feature of the final layer of the decoder head
             decoder_outputs, _ = self.dust3r._decoder(encoded_x, pos, encoded_x, pos)
-            feats = decoder_outputs[-1]
-        else:
-            # linear layer to account for the cross-image attention
-            feats = self.proj1(encoded_x) # (B, N, dec_embed_dim)
-        
-        pts = self.pts_head(feats) # (B, N, 3*P^2)
-        pts = rearrange(pts, 'b n (d1 d2) -> b n d2 d1', d1=3, d2=self.patch_size**2) # (B, N, p^2, 3)
-        pts_feats = self.pts_feat_dim(feats) # (B, N, pts_feat_dim*P^2)
-        pts_feats = rearrange(pts_feats, 'b n (d1 d2) -> b n d2 d1', 
-            d1=self.pts_feat_dim, d2=self.patch_size**2) # (B, N, p^2, pts_feat_dim)
-        pts_feats = torch.cat([pts, pts_feats], dim=-1) # (B, N, p^2, 3+pts_feat_dim)
-        pts_feats = rearrange(pts_feats, 'b n d1 d2 -> b (n d1) (d2)') # (B, N*p^2, 3+pts_feat_dim)
+            outputs = self.dust3r.downstream_head1(decoder_outputs, (true_shape.min(), true_shape.max()))
+            pts3d, conf = outputs['pts3d'], outputs['conf'] # (B, H, W, 3) and (B, H, W)
+            pts3d = rearrange(pts3d, 'b h w c -> b (h w) c')
+            
+            pts_feat = self.pts_feat_head(encoded_x) # (B, N, p^2*D)
+            pts_feat = rearrange(pts_feat, 'b n (p d) -> b (n p) d', p=self.patch_size**2, d=self.pts_feat_dim)
 
-        return pts_feats
+        else:
+            # linear layer to decode
+            pts3d = self.pts_head(encoded_x) # (B, N, p^2*3)
+            pts3d = rearrange(pts3d, 'b n (p d) -> b (n p) d', p=self.patch_size**2, d=3)
+            pts_feat = self.pts_feat_head(encoded_x) # (B, N, p^2*D)
+            pts_feat = rearrange(pts_feat, 'b n (p d) -> b (n p) d', p=self.patch_size**2, d=self.pts_feat_dim)
+
+        return pts3d, pts_feat

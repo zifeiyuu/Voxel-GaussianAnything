@@ -1,0 +1,9 @@
+name: dust3r
+
+version: "mast3r" # "dust3r" or "mast3r"
+
+pts_feat_dim: 32
+use_dust3r_decoder: true
+freeze_encoder: true
+freeze_decoder: true
+freeze_head: false

@@ -22,7 +22,14 @@ class Trainer(nn.Module):
 
         self.cfg = cfg
         self.step = 0
-        self.model = GaussianPredictor(cfg)
+        if cfg.model.name == "unidepth":
+            self.model = GaussianPredictor(cfg)
+        elif cfg.model.name == "gat":
+            from models.gat_model import GATModel
+            self.model = GATModel(cfg)
+        else:
+            raise ValueError(f"Model {cfg.model.name} not supported")
+
         if cfg.loss.ssim.weight > 0:
             self.ssim = SSIM()
         if cfg.loss.lpips.weight > 0:
