@@ -4,6 +4,7 @@ import numpy as np
 from einops import rearrange
 from collections import OrderedDict
 from ..decoder.gaussian_decoder import GaussianDecoder, get_splits_and_inits
+from IPython import embed
 
 class LinearHead(nn.Module):
     def __init__(self, cfg):
@@ -15,15 +16,14 @@ class LinearHead(nn.Module):
         self.split_dimensions, scales, biases = get_splits_and_inits(cfg)
         self.num_output_channels = sum(self.split_dimensions)
 
-        # decoder
+        # linear decoder
         self.gaussian_head = nn.Linear(self.in_dim + 3, self.num_output_channels)
 
         # gaussian parameters initialisation
         start_channel = 0
         for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
             nn.init.xavier_uniform_(
-                self.gaussian_head.weight[start_channel:start_channel+out_channel,
-                                :, :, :], scale)
+                self.gaussian_head.weight[start_channel:start_channel+out_channel, :], scale)
             nn.init.constant_(
                 self.gaussian_head.bias[start_channel:start_channel+out_channel], bias)
             start_channel += out_channel
@@ -31,9 +31,13 @@ class LinearHead(nn.Module):
         # gaussian parameters activation
         self.gaussian_decoder = GaussianDecoder(cfg)
     
-    def forward(self, pts3d):
-        x = self.gaussian_head(pts3d)
-        out = self.gaussian_decoder(x, self.split_dimensions)
+    def forward(self, pts_with_feats):
+        gaussian_params = self.gaussian_head(pts_with_feats)
+
+        # n is the number of gaussians, d is the dimension of the gaussian parameters
+        # we reshape to make flash3d's gaussian decoder happy
+        gaussian_params = rearrange(gaussian_params, 'b n d -> b d n')
+        out = self.gaussian_decoder(gaussian_params, self.split_dimensions)
 
         return out
 

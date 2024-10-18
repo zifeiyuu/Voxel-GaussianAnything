@@ -10,6 +10,7 @@ from models.encoder.layers import BackprojectDepth
 from models.decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from misc.util import add_source_frame_id
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
+from IPython import embed
 
 def default_param_group(model):
     return [{'params': model.parameters()}]
@@ -41,19 +42,15 @@ class BaseModel(nn.Module):
     def set_train(self):
         """Convert all models to training mode
         """
-        for m in self.models.values():
-            m.train()
-        self._is_train = True
+        self.train()
 
     def set_eval(self):
         """Convert all models to testing/evaluation mode
         """
-        for m in self.models.values():
-            m.eval()
-        self._is_train = False
+        self.train(False)
 
     def is_train(self):
-        return self._is_train
+        return self.training
     
     @torch.no_grad()
     def process_gt_poses(self, inputs, outputs):
@@ -114,6 +111,99 @@ class BaseModel(nn.Module):
                 T = outputs[("cam_T_cam", f_i, 0)]
                 T[:, :3, 3] = T[:, :3, 3] * scale
                 outputs[("cam_T_cam", f_i, 0)] = T
+
+    
+    def render_images(self, inputs, outputs):
+        """Generate the warped (reprojected) color images for a minibatch.
+        Generated images are saved into the `outputs` dictionary.
+        """
+        cfg = self.cfg
+        B, _, H, W = inputs["color", 0, 0].shape
+        for scale in [0]: #cfg.model.scales:
+            pos_input_frame = outputs["gauss_means"].float()
+            K = inputs[("K_tgt", 0)]
+            device = pos_input_frame.device
+            dtype = pos_input_frame.dtype
+
+            frame_ids = self.all_frame_ids(inputs)
+
+            for frame_id in frame_ids:
+                if frame_id == 0:
+                    T = torch.eye(4, dtype=dtype, device=device).unsqueeze(0).repeat(B, 1, 1)
+                else:
+                    if ('cam_T_cam', 0, frame_id) not in outputs:
+                        continue
+                    T = outputs[('cam_T_cam', 0, frame_id)]
+                
+                pos = pos_input_frame
+                from IPython import embed
+                point_clouds = {
+                    "xyz": rearrange(pos, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
+                    "opacity": rearrange(outputs["gauss_opacity"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
+                    "scaling": rearrange(outputs["gauss_scaling"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
+                    "rotation": rearrange(outputs["gauss_rotation"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
+                    "features_dc": rearrange(outputs["gauss_features_dc"], "b s c n -> b (s n) 1 c", s=self.cfg.model.gaussians_per_pixel)
+                }
+                if cfg.model.max_sh_degree > 0:
+                    point_clouds["features_rest"] = rearrange(
+                        outputs["gauss_features_rest"], 
+                        "b s (sh rgb) n -> b (s n) sh rgb", 
+                        rgb=3, s=self.cfg.model.gaussians_per_pixel
+                    )
+
+                rgbs = []
+                depths = []
+
+                for b in range(B):
+                    # get camera projection matrix
+                    if cfg.dataset.name in ["kitti", "nyuv2", "waymo"]:
+                        K_tgt = inputs[("K_tgt", 0)]
+                    else:
+                        K_tgt = inputs[("K_tgt", frame_id)]
+                    focals_pixels = torch.diag(K_tgt[b])[:2]
+                    fovY = focal2fov(focals_pixels[1].item(), H)
+                    fovX = focal2fov(focals_pixels[0].item(), W)
+                    if cfg.dataset.name in ["co3d", "re10k", "mixed", "pixelsplat"]:
+                        px_NDC, py_NDC = 0, 0
+                    else:
+                        px_NDC, py_NDC = K_to_NDC_pp(Kx=K_tgt[b][0, 2], Ky=K_tgt[b][1, 2], H=H, W=W)
+                    proj_mtrx = getProjectionMatrix(cfg.dataset.znear, cfg.dataset.zfar, fovX, fovY, pX=px_NDC, pY=py_NDC).to(device)
+                    world_view_transform = T[b].transpose(0, 1).float()
+                    camera_center = (-world_view_transform[3, :3] @ world_view_transform[:3, :3].transpose(0, 1)).float()
+                    proj_mtrx = proj_mtrx.transpose(0, 1).float() # [4, 4]
+                    full_proj_transform = (world_view_transform@proj_mtrx).float()
+                    # use random background for the better opacity learning
+                    if cfg.model.randomise_bg_colour and self.is_train():
+                        bg_color = torch.rand(3, dtype=dtype, device=device)
+                    else:
+                        bg_color = torch.tensor(cfg.model.bg_colour, dtype=dtype, device=device)
+
+                    pc = {k: v[b].contiguous().float() for k, v in point_clouds.items()}
+
+                    out = render_predicted(
+                        cfg,
+                        pc,
+                        world_view_transform,
+                        full_proj_transform,
+                        proj_mtrx,
+                        camera_center,
+                        (fovX, fovY),
+                        (H, W),
+                        bg_color,
+                        cfg.model.max_sh_degree
+                    )
+                    rgb = out["render"]
+                    rgbs.append(rgb)
+                    if "depth" in out:
+                        depths.append(out["depth"])
+                
+                rbgs = torch.stack(rgbs, dim=0)
+                outputs[("color_gauss", frame_id, scale)] = rbgs
+
+                if "depth" in out:
+                    depths = torch.stack(depths, dim=0)
+                    outputs[("depth_gauss", frame_id, scale)] = depths
+    
 
     def checkpoint_dir(self):
         return Path("checkpoints")
