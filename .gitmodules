@@ -7,3 +7,6 @@
 [submodule "submodules/mast3r"]
 	path = submodules/mast3r
 	url = https://github.com/naver/mast3r.git
+[submodule "submodules/splatt3r"]
+	path = submodules/splatt3r
+	url = https://github.com/btsmart/splatt3r.git
