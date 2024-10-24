@@ -166,4 +166,4 @@ cython_debug/
 
 experiments_out
 exp/
-output/
+submodules/UniDepth/pretrained/pytorch_model.bin

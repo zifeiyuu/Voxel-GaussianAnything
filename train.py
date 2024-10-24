@@ -79,9 +79,9 @@ def run_epoch(fabric,
         if early_phase or step % cfg.run.val_frequency == 0:
             torch.cuda.empty_cache()
 
-        # Clear up loss and outputs to free memory
-        del losses, outputs
-        torch.cuda.empty_cache()
+        # # Clear up loss and outputs to free memory
+        # del losses, outputs
+        # torch.cuda.empty_cache()
 
         trainer.step += 1
         lr_scheduler.step()
