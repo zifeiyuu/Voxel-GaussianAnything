@@ -3,7 +3,7 @@ config:
   exp_name: debug
 
 defaults:
-  - override /dataset: re10k
+  - override /dataset: pixelsplat
   - override /model: gaussian
   - override /loss: [regularization, reconstruction]
 

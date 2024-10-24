@@ -1,6 +1,6 @@
 name: pixelsplat
 split: original
-data_path: /mnt/datasets/realestate10k/re10k
+data_path: /data/datasets/re10k
 depth_path: #None
 unpack_pcl_tar: false
 preload_depths: false
@@ -24,7 +24,7 @@ pad_border_aug: 32
 subset: -1  # use subset frames for small set overfitting
 
 frame_sampling_method: random
-scale_pose_by_depth: false   ###################### originally true
+scale_pose_by_depth: true
 test_split: mine
 
 #new

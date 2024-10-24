@@ -93,11 +93,12 @@ class pixelsplatDataset(Dataset):
             if self.cfg.dataset.test_split_path:
                 print(f"test using split file {self.cfg.dataset.test_split_path}")
                 test_split_path = Path(__file__).resolve().parent / ".." / cfg.dataset.test_split_path 
-                self._seq_key_src_idx_pairs = self._load_split_indices(test_split_path)
-            else:
                 if self.cfg.video_mode:
-                    self._seq_key_src_idx_pairs = self._generate_video_indices()
-                elif self.cfg.dataset.random_selection:
+                    self._seq_key_src_idx_pairs = self._generate_video_indices(test_split_path)
+                else:
+                    self._seq_key_src_idx_pairs = self._load_split_indices(test_split_path)
+            else:
+                if self.cfg.dataset.random_selection:
                     self._seq_key_src_idx_pairs = self._generate_random_indices()
                 else:
                     self._seq_key_src_idx_pairs = self._generate_defined_indices(-30, 30)
@@ -225,11 +226,21 @@ class pixelsplatDataset(Dataset):
         
         return key_id_pairs
 
-    def _generate_video_indices(self):
+    def _generate_video_indices(self, index_path):
         """Generate indices such that the middle frame is the source, and all other frames are targets."""
+        def get_key(s):
+            parts = s.split(" ")
+            key = parts[0]
+            return key
+        
+        with open(index_path, "r") as f:
+            lines = f.readlines()
+        keys = list(map(get_key, lines))
+        keys = set(keys)
+
         key_id_pairs = []
-        for key, element in self._pose_data.items():
-            num_frames = len(element)
+        for key in keys:
+            num_frames = len(self._pose_data[key]["timestamps"])
             if num_frames < 2:
                 continue  # Skip if there are not enough frames
 
@@ -317,14 +328,12 @@ class pixelsplatDataset(Dataset):
             elif self.cfg.dataset.frame_sampling_method == "random":
                 target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
                 src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]    
-            # frame_names = [0] + self.novel_frames            
+            frame_names = [0] + self.novel_frames            
         else:
             seq_key, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
             pose_data = self._pose_data[seq_key]
-            # frame_names = [0, 1, 2, 3]
-
-        total_frame_num = len(src_and_tgt_frame_idxs)
-        frame_names = list(range(total_frame_num))
+            total_frame_num = len(src_and_tgt_frame_idxs)
+            frame_names = list(range(total_frame_num))
 
         do_color_aug = self.is_train and random.random() > 0.5 and self.color_aug
         if do_color_aug:
