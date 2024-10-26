@@ -3,6 +3,7 @@ from PIL import Image
 import numpy as np
 import io
 import torchvision.transforms as T
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 from pathlib import Path
 import random 
@@ -33,7 +34,12 @@ class pixelsplatDataset(Dataset):
             if not self.data_folder.exists():
                 raise FileNotFoundError(f"Relative path {relative_path} does not exist")
         elif not self.data_folder.exists():
-            raise fileNotFoundError(f"Absolute path {self.data_folder} does not exist")
+            raise FileNotFoundError(f"Absolute path {self.data_folder} does not exist")
+        
+        self.depth_path = None
+        if cfg.dataset.depth_path is not None:
+            self.depth_path = Path(self.cfg.dataset.depth_path) 
+
         self.data_folder = self.data_folder.resolve()
 
         self.image_size = (self.cfg.dataset.height, self.cfg.dataset.width)
@@ -83,6 +89,10 @@ class pixelsplatDataset(Dataset):
         self._pose_data = self._load_pose_data()
 
         self._seq_keys = list(self._pose_data.keys())
+
+        # self._seq_keys = [i for i in self._seq_keys if i.startswith("0a0")] #########################@@@@@@@@@@@@@@@@@
+
+
         missing_keys_path = self.data_folder / f"{self.split_name_for_loading}_missing_keys.txt"
         with open(missing_keys_path, 'r') as f:
             missing_keys = f.read().splitlines() 
@@ -287,7 +297,7 @@ class pixelsplatDataset(Dataset):
         return key_id_pairs
     
     def _load_depth(self, key, id):
-        path = self.data_folder / f"{self.split_name_for_loading}"
+        path = self.depth_path / self.split_name_for_loading / "depth"
         depth_file = f"{key}/{id}.png"
         if os.path.exists(path / depth_file):
             depth = Image.open(path / depth_file)
@@ -297,24 +307,15 @@ class pixelsplatDataset(Dataset):
             # Scale from uint16 range
             depth = (np.array(depth).astype(np.float32) / (2 ** 16 - 1)) * (max_value - min_value) + min_value
         else:
-            # print("Depth file {} is not exist", path / depth_file)
             depth = None
         return depth
     
-    def get_data(self, frame_idx, pose_data, image_path, color_aug_fn):
+    def get_data(self, seq_key, frame_idx, pose_data, image_path, color_aug_fn):
         # Process the intrinsic and pose for the current frame
         # intrinsic_and_pose = pose_data[frame_idx]
         # intrinsic = intrinsic_and_pose[0:6]  # Extract intrinsic parameters
         # pose = intrinsic_and_pose[6:18]
         # pose = np.array(pose).reshape(3, 4)
-
-        # if self.data_folder is not None:
-            # depth = self._load_depth(seq_key, frame_idx)
-        #     if depth is not None:
-        #         depth = self.to_tensor(depth)
-        #         depth = F.interpolate(depth[None,...], size=self.image_size, mode="nearest")[0]
-        # else:
-        #     depth = None
 
         intrinsic = pose_data["intrinsics"][frame_idx]
         pose = pose_data["poses"][frame_idx]
@@ -350,18 +351,29 @@ class pixelsplatDataset(Dataset):
         # Convert the resized image to a tensor
         inputs_color = self.to_tensor(img_scale)
 
+        if self.depth_path is not None:
+            depth = self._load_depth(seq_key, frame_idx)
+            if depth is not None:
+                depth = self.to_tensor(depth)
+                depth = F.interpolate(depth[None,...], size=self.image_size, mode="nearest")[0]
+        else:
+            depth = None
+
         # Apply padding and color augmentation if needed
         if self.cfg.dataset.pad_border_aug != 0:
             inputs_color_aug = self.to_tensor(color_aug_fn(self.pad_border_fn(img_scale)))
+            if depth is not None:
+                pad = self.cfg.dataset.pad_border_aug
+                depth = F.pad(depth, (pad,pad,pad,pad), mode="replicate")
         else:
             inputs_color_aug = self.to_tensor(color_aug_fn(img_scale))
-        
+
         # Process the extrinsic matrix (pose)
         c2w = data_to_c2w(pose)
         # original world-to-camera matrix in row-major order and transfer to column-major order
         inputs_T_c2w = torch.from_numpy(c2w)
 
-        return inputs_K_scale_target, inputs_K_scale_source, inputs_inv_K_source, inputs_color, inputs_color_aug, inputs_T_c2w, img.size
+        return inputs_K_scale_target, inputs_K_scale_source, inputs_inv_K_source, inputs_color, inputs_color_aug, inputs_T_c2w, img.size, depth
   
     def __getitem__(self, index):
         # Get the sequence key and frame indices
@@ -407,7 +419,8 @@ class pixelsplatDataset(Dataset):
         for frame_name, frame_idx in zip(frame_names, src_and_tgt_frame_idxs):
 
             inputs_K_tgt, inputs_K_src, inputs_inv_K_src, inputs_color, inputs_color_aug, \
-            inputs_T_c2w, orig_size = self.get_data(
+            inputs_T_c2w, orig_size, inputs_depth = self.get_data(
+                                                seq_key=seq_key,
                                                 frame_idx=frame_idx, 
                                                 pose_data = pose_data,
                                                 image_path = image_path,
@@ -425,6 +438,9 @@ class pixelsplatDataset(Dataset):
             input_frame_idx = src_and_tgt_frame_idxs[0]  # The source frame
             timestamp = pose_data["timestamps"][input_frame_idx]
             inputs[("frame_id", 0)] = f"{self.split}+{seq_key}+{timestamp}"
+
+            if inputs_depth is not None:
+                inputs[("unidepth", frame_name, 0)] = inputs_depth
 
             # Prepare the inputs dictionary
             inputs[("K_tgt", frame_name)] = inputs_K_tgt

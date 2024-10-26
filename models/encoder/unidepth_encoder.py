@@ -28,11 +28,12 @@ class UniDepthExtended(nn.Module):
         #     force_reload=True
         # )
 
-        self.unidepth = UniDepth(
-            version=cfg.model.depth.version, 
-            backbone=cfg.model.depth.backbone, 
-            pretrained=True
-        )
+        if cfg.dataset.depth_path is None:
+            self.unidepth = UniDepth(
+                version=cfg.model.depth.version, 
+                backbone=cfg.model.depth.backbone, 
+                pretrained=True
+            )
         
 
         self.parameters_to_train = []

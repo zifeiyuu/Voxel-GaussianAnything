@@ -1,11 +1,11 @@
 name: pixelsplat
 split: original
 data_path: /data/datasets/re10k
-depth_path: #None
+depth_path: #/data/datasets/re10k
 unpack_pcl_tar: false
 preload_depths: false
 ransac_on_the_fly: false
-test_split_path: splits/re10k_mine_filtered/val_files.txt
+test_split_path: splits/re10k_mine_filtered/test_files.txt
 
 height: 256
 width: 384

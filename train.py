@@ -36,20 +36,22 @@ def run_epoch(fabric,
     if fabric.is_global_zero:
         logging.info("Training on epoch {}".format(trainer.epoch))
 
-
+    max_iterations = 12002
     for batch_idx, inputs in enumerate(tqdm(train_loader, desc="Training", 
                                             total=len(train_loader), dynamic_ncols=True)):
+        step = trainer.step
+        if step >= max_iterations:
+            break
         # instruct the model which novel frames to render
         inputs["target_frame_ids"] = cfg.model.gauss_novel_frames
         losses, outputs = trainer(inputs)
+        
         optimiser.zero_grad(set_to_none=True)
         fabric.backward(losses["loss/total"])
         optimiser.step()
 
         if ema is not None:
             ema.update()
-        
-        step = trainer.step
 
         early_phase = batch_idx % trainer.cfg.run.log_frequency == 0 and step < 6000
         if fabric.is_global_zero:
@@ -76,7 +78,7 @@ def run_epoch(fabric,
                     trainer.validate(model_eval, evaluator, val_loader, device=fabric.device)
 
         # Clean up and free GPU memory
-        if early_phase or step % cfg.run.val_frequency == 0:
+        if early_phase or step % cfg.run.val_frequency == 0 or (step % 500 == 0): #################@@@@@@@@@@@@@@@@
             torch.cuda.empty_cache()
 
         # # Clear up loss and outputs to free memory
@@ -85,6 +87,7 @@ def run_epoch(fabric,
 
         trainer.step += 1
         lr_scheduler.step()
+
 
 
 @hydra.main(
@@ -156,7 +159,7 @@ def main(cfg: DictConfig):
     if fabric.is_global_zero:
         # if cfg.train.logging:
         #     trainer.set_logger(setup_logger(cfg))
-        val_dataset, val_loader = create_datasets(cfg, split="val")   #########################       split="val"
+        val_dataset, val_loader = create_datasets(cfg, split="val") 
         evaluator = Evaluator()
         evaluator = fabric.to_device(evaluator)
     else:
