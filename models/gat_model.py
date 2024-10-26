@@ -14,6 +14,8 @@ from .heads.gat_head import LinearHead
 from misc.util import add_source_frame_id
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
 
+from .decoder.pointcloud_decoder import PointTransformerDecoder
+
 from IPython import embed
 
 def default_param_group(model):
@@ -41,10 +43,9 @@ class GATModel(BaseModel):
             self.encoder = Dust3rEncoder(cfg)
         self.parameters_to_train += self.encoder.get_parameter_groups()
 
-        self.use_3d_refine = True
-        if self.use_3d_refine:
-            # TODO: define the point cloud network
-            pass
+        self.use_3d_decoder = True
+        if self.use_3d_decoder:
+            self.decoder_3d = PointTransformerDecoder(cfg)
         
         self.gaussian_head = LinearHead(cfg)
         self.parameters_to_train += [{'params': self.gaussian_head.parameters()}]
@@ -57,9 +58,8 @@ class GATModel(BaseModel):
         # we do not use unprojection, so as camera intrinsics
         pts3d, pts_feat = self.encoder(inputs) # (B, N, 3) and (B, N, C)
 
-        if self.use_3d_refine:
-            # TODO: refine the 3d points and features using point cloud network
-            pass
+        if self.use_3d_decoder:
+            pts3d, pts_feat = self.decoder_3d(pts3d, pts_feat)
 
         # predict gaussian parameters for each point
         outputs = self.gaussian_head(torch.cat([pts3d, pts_feat], dim=-1))
