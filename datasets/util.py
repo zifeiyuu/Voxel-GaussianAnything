@@ -1,6 +1,6 @@
 import torch
 import logging
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, DistributedSampler
 
 from packaging.version import Version
 from datasets.re10k import Re10KDataset
@@ -9,7 +9,7 @@ from datasets.kitti import KITTIDataset
 from datasets.pixelsplatDataset import pixelsplatDataset
 from datasets.scannetppDataset import scannetppDataset
 
-def create_datasets(cfg, split="val"):
+def create_datasets(cfg, split="val", distributed=False, rank=0):
 
     datasets_dict = {
         "pixelsplat": pixelsplatDataset,
@@ -20,15 +20,25 @@ def create_datasets(cfg, split="val"):
     logging.info("There are {:d} {} items. Using {}\n".format(len(dataset), split, cfg.dataset)
     )
     shuffle = True if split == "train" else False
-    data_loader = DataLoader(
-        dataset,
-        cfg.data_loader.batch_size,
-        shuffle=shuffle,
-        num_workers=cfg.data_loader.num_workers,
-        pin_memory=True,
-        drop_last=shuffle,
-        collate_fn=custom_collate,
-    )
+    if distributed:
+        train_sampler = DistributedSampler(dataset, num_replicas=cfg.train.num_gpus, rank=rank)
+        data_loader = DataLoader(dataset, 
+            batch_size=cfg.data_loader.batch_size, 
+            num_workers=cfg.data_loader.num_workers,
+            pin_memory=True,
+            drop_last=shuffle,
+            collate_fn=custom_collate,
+            sampler=train_sampler)
+    else:
+        data_loader = DataLoader(
+            dataset,
+            cfg.data_loader.batch_size,
+            shuffle=shuffle,
+            num_workers=cfg.data_loader.num_workers,
+            pin_memory=True,
+            drop_last=shuffle,
+            collate_fn=custom_collate,
+        )
 
     return dataset, data_loader
 

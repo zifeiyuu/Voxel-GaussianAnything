@@ -33,7 +33,7 @@ class pixelsplatDataset(Dataset):
             if not self.data_folder.exists():
                 raise FileNotFoundError(f"Relative path {relative_path} does not exist")
         elif not self.data_folder.exists():
-            raise fileNotFoundError(f"Absolute path {self.data_folder} does not exist")
+            raise FileNotFoundError(f"Absolute path {self.data_folder} does not exist")
         self.data_folder = self.data_folder.resolve()
 
         self.image_size = (self.cfg.dataset.height, self.cfg.dataset.width)

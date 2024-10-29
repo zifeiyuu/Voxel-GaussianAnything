@@ -6,6 +6,8 @@ frame_ids: [0, -1, 1]
 scales: [0]
 gauss_novel_frames: [1, 2, 3] #
 
+use_3d_decoder: false
+
 min_depth: 0.1
 max_depth: 100
 
