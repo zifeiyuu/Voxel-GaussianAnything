@@ -19,8 +19,6 @@ import einops
 from timm.models.layers import DropPath
 import pointops
 
-from pointcept.models.utils import offset2batch, batch2offset
-
 @torch.inference_mode()
 def offset2bincount(offset):
     return torch.diff(

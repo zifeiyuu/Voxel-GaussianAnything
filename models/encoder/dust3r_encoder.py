@@ -90,12 +90,12 @@ class Dust3rEncoder(nn.Module):
             self.pts_head = nn.Sequential(
                 nn.Linear(enc_dim, 3 * self.patch_size**2)
             )
-            self.parameters_to_train += [{"params": self.pts_head.parameters()}]
+            self.parameters_to_train += [{"params": list(self.pts_head.parameters())}]
 
         self.pts_feat_head = nn.Sequential(
             nn.Linear(enc_dim, self.pts_feat_dim * self.patch_size**2)
         )
-        self.parameters_to_train += [{"params": self.pts_feat_head.parameters()}]
+        self.parameters_to_train += [{"params": list(self.pts_feat_head.parameters())}]
 
         # freeze ,delete and add modules
         if cfg.model.backbone.freeze_encoder:
@@ -111,7 +111,7 @@ class Dust3rEncoder(nn.Module):
             elif module in modules_to_freeze:
                 freeze_all_params(getattr(self.dust3r, module))
             else:
-                self.parameters_to_train += [{"params": getattr(self.dust3r, module).parameters()}]
+                self.parameters_to_train += [{"params": list(getattr(self.dust3r, module).parameters())}]
 
     def get_parameter_groups(self):
         return self.parameters_to_train

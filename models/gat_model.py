@@ -43,12 +43,13 @@ class GATModel(BaseModel):
             self.encoder = Dust3rEncoder(cfg)
         self.parameters_to_train += self.encoder.get_parameter_groups()
 
-        self.use_3d_decoder = True
+        self.use_3d_decoder = cfg.model.use_3d_decoder
         if self.use_3d_decoder:
             self.decoder_3d = PointTransformerDecoder(cfg)
+            self.parameters_to_train += self.decoder_3d.get_parameter_groups()
         
         self.gaussian_head = LinearHead(cfg)
-        self.parameters_to_train += [{'params': self.gaussian_head.parameters()}]
+        self.parameters_to_train += [{'params': list(self.gaussian_head.parameters())}]
 
 
     def forward(self, inputs):

@@ -11,6 +11,7 @@ class PointTransformerDecoder(nn.Module):
         self.cfg = cfg
         feat_dim = cfg.model.backbone.pts_feat_dim
         self.transformer = PointTransformerV1_26(in_channels=feat_dim)
+        self.parameters_to_train = [{"params": list(self.transformer.parameters())}]
 
     def forward(self, pts3d, pts_feat):
         # pts3d: (B, N, 3)
@@ -31,3 +32,6 @@ class PointTransformerDecoder(nn.Module):
         pts_feat = rearrange(pts_feat, "(B N) C -> B N C", B=B, N=N)
 
         return pts3d, pts_feat
+
+    def get_parameter_groups(self):
+        return self.parameters_to_train
