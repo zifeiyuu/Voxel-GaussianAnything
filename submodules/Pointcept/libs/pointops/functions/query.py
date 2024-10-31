@@ -23,6 +23,11 @@ class KNNQuery(Function):
         )
         return idx, torch.sqrt(dist2)
 
+    @staticmethod
+    def backward(ctx, idx, dist2):
+        # no gradient
+        return (None, None, None, None, None)
+
 
 class RandomBallQuery(Function):
     """Random Ball Query.

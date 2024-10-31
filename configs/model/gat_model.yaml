@@ -1,12 +1,13 @@
 defaults:
   - backbone: dust3r_encoder
+  - decoder_3d: PT_decoder
 
 name: gat
 frame_ids: [0, -1, 1]
 scales: [0]
 gauss_novel_frames: [1, 2, 3] #
 
-use_3d_decoder: false
+use_decoder_3d: true
 
 min_depth: 0.1
 max_depth: 100
