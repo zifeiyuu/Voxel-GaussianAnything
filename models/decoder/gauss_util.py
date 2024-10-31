@@ -12,8 +12,29 @@
 import torch
 import numpy as np
 import math
+from einops import einsum
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 
+
+def debug_vis_pointcloud(xyz, K, H, W, image=None):
+    if image is None:
+        image = np.zeros((H, W, 3), dtype=np.uint8)
+    else:
+        image = image.copy()
+
+    for point in xyz:
+        x, y, z = point
+        x_img = int(K[0, 0] * x / z + K[0, 2])
+        y_img = int(K[1, 1] * y / z + K[1, 2])
+        
+        if 0 <= x_img < W and 0 <= y_img < H:
+            image[y_img, x_img] = [255, 255, 255]
+    
+    import cv2, time
+    t = str(time.time())
+    t = t.replace(".", "")
+    t = t[:14]
+    cv2.imwrite(f"debug_{t}.png", image)
 
 def getProjectionMatrix(znear, zfar, fovX, fovY, pX=0.0, pY=0.0):
     tanHalfFovY = math.tan((fovY / 2))
