@@ -43,8 +43,8 @@ class GATModel(BaseModel):
             self.encoder = Dust3rEncoder(cfg)
         self.parameters_to_train += self.encoder.get_parameter_groups()
 
-        self.use_3d_decoder = cfg.model.use_3d_decoder
-        if self.use_3d_decoder:
+        self.use_decoder_3d = cfg.model.use_decoder_3d
+        if self.use_decoder_3d:
             self.decoder_3d = PointTransformerDecoder(cfg)
             self.parameters_to_train += self.decoder_3d.get_parameter_groups()
         
@@ -59,7 +59,7 @@ class GATModel(BaseModel):
         # we do not use unprojection, so as camera intrinsics
         pts3d, pts_feat = self.encoder(inputs) # (B, N, 3) and (B, N, C)
 
-        if self.use_3d_decoder:
+        if self.use_decoder_3d:
             pts3d, pts_feat = self.decoder_3d(pts3d, pts_feat)
 
         # predict gaussian parameters for each point

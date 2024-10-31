@@ -59,19 +59,28 @@ class PointTransformerLayer(nn.Module):
     def forward(self, pxo) -> torch.Tensor:
         p, x, o = pxo  # (n, 3), (n, c), (b)
         x_q, x_k, x_v = self.linear_q(x), self.linear_k(x), self.linear_v(x)
-        x_k, idx = pointops.knn_query_and_group(
-            x_k, p, o, new_xyz=p, new_offset=o, nsample=self.nsample, with_xyz=True
+        with torch.no_grad():
+            idx, _ = pointops.knn_query(
+                self.nsample, p, o, p, o
+            )
+        x_k = pointops.grouping(idx, x_k, p, p, with_xyz=True)
+        # x_k, idx = pointops.knn_query_and_group(
+        #     x_k, p, o, new_xyz=p, new_offset=o, nsample=self.nsample, with_xyz=True
+        # )
+        x_v = pointops.grouping(
+            idx, x_v, p, p, with_xyz=False
         )
-        x_v, _ = pointops.knn_query_and_group(
-            x_v,
-            p,
-            o,
-            new_xyz=p,
-            new_offset=o,
-            idx=idx,
-            nsample=self.nsample,
-            with_xyz=False,
-        )
+
+        # x_v, _ = pointops.knn_query_and_group(
+        #     x_v,
+        #     p,
+        #     o,
+        #     new_xyz=p,
+        #     new_offset=o,
+        #     idx=idx,
+        #     nsample=self.nsample,
+        #     with_xyz=False,
+        # )
         p_r, x_k = x_k[:, :, 0:3], x_k[:, :, 3:]
         p_r = self.linear_p(p_r)
         r_qk = (
@@ -114,15 +123,20 @@ class TransitionDown(nn.Module):
             n_o = torch.cuda.IntTensor(n_o)
             idx = pointops.farthest_point_sampling(p, o, n_o)  # (m)
             n_p = p[idx.long(), :]  # (m, 3)
-            x, _ = pointops.knn_query_and_group(
-                x,
-                p,
-                offset=o,
-                new_xyz=n_p,
-                new_offset=n_o,
-                nsample=self.nsample,
-                with_xyz=True,
-            )
+            # x, _ = pointops.knn_query_and_group(
+            #     x,
+            #     p,
+            #     offset=o,
+            #     new_xyz=n_p,
+            #     new_offset=n_o,
+            #     nsample=self.nsample,
+            #     with_xyz=True,
+            # )
+            with torch.no_grad():
+                idx, _ = pointops.knn_query(
+                    self.nsample, p, o, n_p, n_o
+                )
+            x = pointops.grouping(idx, x, p, n_p, with_xyz=True)
             x = self.relu(
                 self.bn(self.linear(x).transpose(1, 2).contiguous())
             )  # (m, c, nsample)
@@ -301,6 +315,7 @@ class PointTransformerV1(nn.Module):
         p3, x3, o3 = self.enc3([p2, x2, o2])
         p4, x4, o4 = self.enc4([p3, x3, o3])
         p5, x5, o5 = self.enc5([p4, x4, o4])
+        embed()
         x5 = self.dec5[1:]([p5, self.dec5[0]([p5, x5, o5]), o5])[1]
         x4 = self.dec4[1:]([p4, self.dec4[0]([p4, x4, o4], [p5, x5, o5]), o4])[1]
         x3 = self.dec3[1:]([p3, self.dec3[0]([p3, x3, o3], [p4, x4, o4]), o3])[1]

@@ -70,7 +70,7 @@ def run_epoch(fabric,
                 trainer.model.save_model(optimiser, step, ema)
             # save the validation results
             early_phase = (step < 6000) and (step % 500 == 0)
-            if early_phase or step % cfg.run.val_frequency == 0:
+            if step > 0 and (early_phase or step % cfg.run.val_frequency == 0):
                 with torch.no_grad():
                     model_eval = ema if ema is not None else trainer.model
                     trainer.validate(model_eval, evaluator, val_loader, device=fabric.device)

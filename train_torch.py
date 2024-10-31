@@ -51,7 +51,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
             learning_rate = max(learning_rate)
 
         # Log training metrics
-        if local_rank == 0 and step > 0:  # Only log from the main process
+        if local_rank == 0:  # Only log from the main process
             trainer.log_scalars("train", outputs, losses, learning_rate)
 
             # Log model outputs and save the model at defined intervals
@@ -61,7 +61,8 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
             if step % cfg.run.save_frequency == 0 and step != 0:
                 trainer.model.save_model(optimiser, step, ema)
 
-            if early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None:
+            if step > 0 and (
+                early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
                 with torch.no_grad():
                     model_eval = ema if ema is not None else trainer.model
                     trainer.validate(model_eval, evaluator, val_loader, device='cuda')
@@ -106,7 +107,7 @@ def main(cfg: DictConfig):
         model.to(local_rank), device_ids=[local_rank], find_unused_parameters=True)
     
     # Set up optimiser
-    optimiser = optim.Adam(model.parameters(), cfg.optimiser.learning_rate)
+    optimiser = optim.Adam(model.get_parameter_groups(), cfg.optimiser.learning_rate)
     def lr_lambda(step):
         threshold = cfg.optimiser.scheduler_lambda_step_size
         return 1.0 if step < threshold else 0.1

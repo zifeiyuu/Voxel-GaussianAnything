@@ -38,8 +38,10 @@ def grouping(idx, feat, xyz, new_xyz=None, with_xyz=False):
         new_xyz = xyz
     assert xyz.is_contiguous() and feat.is_contiguous()
     m, nsample, c = idx.shape[0], idx.shape[1], feat.shape[1]
-    xyz = torch.cat([xyz, torch.zeros([1, 3]).to(xyz.device)], dim=0)
-    feat = torch.cat([feat, torch.zeros([1, c]).to(feat.device)], dim=0)
+    # xyz = torch.cat([xyz, torch.zeros([1, 3]).to(xyz.device)], dim=0)
+    # feat = torch.cat([feat, torch.zeros([1, c]).to(feat.device)], dim=0)
+    xyz = torch.cat([xyz, xyz.new_zeros(1, 3)], dim=0)
+    feat = torch.cat([feat, feat.new_zeros(1, c)], dim=0)
     grouped_feat = feat[idx.view(-1).long(), :].view(
         m, nsample, c
     )  # (m, num_sample, c)
