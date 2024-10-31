@@ -223,7 +223,7 @@ class Trainer(nn.Module):
         """
         if not output_path:
             output_path = self.output_path
-        score_dict_by_name = evaluate(model, self.cfg, evaluator, val_loader, device, False, output_path)
+        score_dict_by_name = evaluate(model, self.cfg, evaluator, val_loader, device, self.cfg.save_vis, output_path)
         split = "val"
         out = {}
         for metric in evaluator.metric_names():

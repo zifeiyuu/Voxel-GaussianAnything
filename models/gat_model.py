@@ -55,6 +55,7 @@ class GATModel(BaseModel):
         
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
+
         pts3d, pts_feat = self.encoder(inputs) # (B, N, 3) and (B, N, C)
 
         if self.use_3d_refine:
@@ -65,7 +66,8 @@ class GATModel(BaseModel):
         outputs = self.gaussian_head(torch.cat([pts3d, pts_feat], dim=-1))
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
-        outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
+        # outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
+        outputs["gauss_means"] = pts3d_reshape
 
         if cfg.model.gaussian_rendering:
             self.process_gt_poses(inputs, outputs)

@@ -36,12 +36,12 @@ def run_epoch(fabric,
     if fabric.is_global_zero:
         logging.info("Training on epoch {}".format(trainer.epoch))
 
-    max_iterations = 12002
+    # max_iterations = 25002
     for batch_idx, inputs in enumerate(tqdm(train_loader, desc="Training", 
                                             total=len(train_loader), dynamic_ncols=True)):
         step = trainer.step
-        if step >= max_iterations:
-            break
+        # if step >= max_iterations:
+        #     break
         # instruct the model which novel frames to render
         inputs["target_frame_ids"] = cfg.model.gauss_novel_frames
         losses, outputs = trainer(inputs)
@@ -71,7 +71,7 @@ def run_epoch(fabric,
             if step % cfg.run.save_frequency == 0 and step != 0:
                 trainer.model.save_model(optimiser, step, ema)
             # save the validation results
-            early_phase = (step < 6000) and (step % 500 == 0)
+            early_phase = (step < 6000) and (step % 500 == 0) #500
             if early_phase or step % cfg.run.val_frequency == 0:
                 with torch.no_grad():
                     model_eval = ema if ema is not None else trainer.model

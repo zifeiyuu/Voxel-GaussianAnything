@@ -11,6 +11,10 @@ from models.decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_p
 from misc.util import add_source_frame_id
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
 from IPython import embed
+from matplotlib import pyplot as plt
+import numpy as np
+
+from submodules.extra import project_point_cloud_to_depth_map, save_point_cloud_with_plyfile
 
 def default_param_group(model):
     return [{'params': model.parameters()}]
@@ -136,14 +140,22 @@ class BaseModel(nn.Module):
                     T = outputs[('cam_T_cam', 0, frame_id)]
                 
                 pos = pos_input_frame
+
+
                 from IPython import embed
                 point_clouds = {
-                    "xyz": rearrange(pos, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
-                    "opacity": rearrange(outputs["gauss_opacity"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
-                    "scaling": rearrange(outputs["gauss_scaling"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
-                    "rotation": rearrange(outputs["gauss_rotation"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
-                    "features_dc": rearrange(outputs["gauss_features_dc"], "b s c n -> b (s n) 1 c", s=self.cfg.model.gaussians_per_pixel)
+                    "xyz": rearrange(pos, "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
+                    "opacity": rearrange(outputs["gauss_opacity"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
+                    "scaling": rearrange(outputs["gauss_scaling"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
+                    "rotation": rearrange(outputs["gauss_rotation"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
+                    "features_dc": rearrange(outputs["gauss_features_dc"], "b n c l -> b (n l) 1 c", n=self.cfg.model.gaussians_per_pixel)
                 }
+                    # "xyz": rearrange(pos, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
+                    # "opacity": rearrange(outputs["gauss_opacity"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
+                    # "scaling": rearrange(outputs["gauss_scaling"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
+                    # "rotation": rearrange(outputs["gauss_rotation"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
+                    # "features_dc": rearrange(outputs["gauss_features_dc"], "b s c n -> b (s n) 1 c", s=self.cfg.model.gaussians_per_pixel)
+
                 if cfg.model.max_sh_degree > 0:
                     point_clouds["features_rest"] = rearrange(
                         outputs["gauss_features_rest"], 
@@ -196,7 +208,17 @@ class BaseModel(nn.Module):
                     rgbs.append(rgb)
                     if "depth" in out:
                         depths.append(out["depth"])
-                
+
+                    rgb2 = rgb.clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
+                    input_aug = inputs[("color_aug", 0, 0)][0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
+                    # if frame_id == 0:
+                    #     plt.imsave(f"/mnt/ziyuxiao/code/GaussianAnything/output/render_image/render_image_{str(time.time())}.png", rgb2)  
+                    #     plt.imsave(f"/mnt/ziyuxiao/code/GaussianAnything/output/aug/aug_{str(time.time())}.png", input_aug)  
+                    #     spliced_image = np.concatenate((rgb2, input_aug), axis=1)
+                    #     spliced_image_uint8 = (spliced_image * 255).astype(np.uint8)
+                    #     spliced_image_path = f"/mnt/ziyuxiao/code/GaussianAnything/output/splice/{str(time.time())}.png"
+                    #     plt.imsave(spliced_image_path, spliced_image_uint8)
+
                 rbgs = torch.stack(rgbs, dim=0)
                 outputs[("color_gauss", frame_id, scale)] = rbgs
 

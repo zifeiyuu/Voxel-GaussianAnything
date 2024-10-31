@@ -11,6 +11,7 @@ import os
 import pickle
 import gzip
 from tqdm import tqdm
+from matplotlib import pyplot as plt
 
 from datasets.data import process_projs, data_to_c2w, pil_loader, get_sparse_depth
 from datasets.tardataset import TarDataset
@@ -90,7 +91,7 @@ class pixelsplatDataset(Dataset):
 
         self._seq_keys = list(self._pose_data.keys())
 
-        # self._seq_keys = [i for i in self._seq_keys if i.startswith("0a0")] #########################@@@@@@@@@@@@@@@@@
+        # self._seq_keys = [i for i in self._seq_keys if i.startswith("0a004eb4d08f31dc")] #########################@@@@@@@@@@@@@@@@@
 
 
         missing_keys_path = self.data_folder / f"{self.split_name_for_loading}_missing_keys.txt"
@@ -368,6 +369,7 @@ class pixelsplatDataset(Dataset):
         else:
             inputs_color_aug = self.to_tensor(color_aug_fn(img_scale))
 
+
         # Process the extrinsic matrix (pose)
         c2w = data_to_c2w(pose)
         # original world-to-camera matrix in row-major order and transfer to column-major order
@@ -437,7 +439,7 @@ class pixelsplatDataset(Dataset):
             # Additional metadata
             input_frame_idx = src_and_tgt_frame_idxs[0]  # The source frame
             timestamp = pose_data["timestamps"][input_frame_idx]
-            inputs[("frame_id", 0)] = f"{self.split}+{seq_key}+{timestamp}"
+            inputs[("frame_id", 0)] = f"{timestamp}+{self.split}+{seq_key}"
 
             if inputs_depth is not None:
                 inputs[("unidepth", frame_name, 0)] = inputs_depth
