@@ -7,7 +7,7 @@ from pathlib import Path
 from einops import rearrange
 
 from models.encoder.layers import BackprojectDepth
-from models.decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
+from models.decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted, debug_vis_pointcloud
 from misc.util import add_source_frame_id
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
 from IPython import embed
@@ -36,6 +36,9 @@ class BaseModel(nn.Module):
         assert cfg.dataset.width % 32 == 0 and cfg.dataset.height % 32 == 0, "'width' and 'height' must be a multiple of 32"
 
         self.parameters_to_train = []
+    
+    def get_parameter_groups(self):
+        return self.parameters_to_train
 
     def target_frame_ids(self, inputs):
         return inputs["target_frame_ids"]
@@ -141,8 +144,6 @@ class BaseModel(nn.Module):
                 
                 pos = pos_input_frame
 
-
-                from IPython import embed
                 point_clouds = {
                     "xyz": rearrange(pos, "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
                     "opacity": rearrange(outputs["gauss_opacity"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
@@ -173,6 +174,19 @@ class BaseModel(nn.Module):
                     else:
                         K_tgt = inputs[("K_tgt", frame_id)]
                     focals_pixels = torch.diag(K_tgt[b])[:2]
+                    
+                    debug = False
+                    if debug and frame_id == 0:
+                        import numpy as np
+                        image = inputs[("color", 0, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
+                        image = (image * 255).astype(np.uint8)
+                        xyz = outputs["pts3d_pred"].squeeze().transpose(0, 1).detach().cpu()
+                        debug_vis_pointcloud(xyz, K_tgt[b], H, W, image)
+                        debug_vis_pointcloud([], K_tgt[b], H, W, image)
+                        image2 = inputs[("color", 3, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
+                        image2 = (image2 * 255).astype(np.uint8)
+                        debug_vis_pointcloud([], K_tgt[b], H, W, image2)
+
                     fovY = focal2fov(focals_pixels[1].item(), H)
                     fovX = focal2fov(focals_pixels[0].item(), W)
                     if cfg.dataset.name in ["co3d", "re10k", "mixed", "pixelsplat"]:

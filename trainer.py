@@ -110,7 +110,10 @@ class Trainer(nn.Module):
                 total_loss += offs_lmbd * big_offset_reg_loss
 
             # reconstruction loss
-            frame_ids = self.model.all_frame_ids(inputs)
+            if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                frame_ids = self.model.module.all_frame_ids(inputs)
+            else:
+                frame_ids = self.model.all_frame_ids(inputs)
             rec_loss = 0
             for frame_id in frame_ids:
                 # compute gaussian reconstruction loss
@@ -162,7 +165,10 @@ class Trainer(nn.Module):
         """Write images to Neptune
         """
         cfg = self.cfg
-        frame_ids = self.model.all_frame_ids(inputs)
+        if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+            frame_ids = self.model.module.all_frame_ids(inputs)
+        else:
+            frame_ids = self.model.all_frame_ids(inputs)
         scales = cfg.model.scales
         logger = self.logger
         if logger is None:

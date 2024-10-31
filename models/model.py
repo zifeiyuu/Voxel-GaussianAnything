@@ -109,6 +109,7 @@ class GaussianPredictor(nn.Module):
         cfg = self.cfg
         scale = self.cfg.model.scales[0]
         depth = outputs[('depth', scale)]
+
         B, _, H, W = depth.shape
         inv_K = outputs[("inv_K_src", scale)]
         if self.cfg.model.gaussians_per_pixel > 1:
@@ -217,7 +218,8 @@ class GaussianPredictor(nn.Module):
                     P = rearrange(T[:, :3, :][:, None, ...].repeat(1, self.cfg.model.gaussians_per_pixel, 1, 1),
                                   'b n ... -> (b n) ...')
                     pos = torch.matmul(P, pos_input_frame)
-                
+
+
                 point_clouds = {
                     "xyz": rearrange(pos[:, :3, :], "(b n) c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
                     "opacity": rearrange(outputs["gauss_opacity"], "(b n) c h w -> b (n h w) c", n=self.cfg.model.gaussians_per_pixel),
@@ -225,6 +227,7 @@ class GaussianPredictor(nn.Module):
                     "rotation": rearrange(outputs["gauss_rotation"], "(b n) c h w -> b (n h w) c", n=self.cfg.model.gaussians_per_pixel),
                     "features_dc": rearrange(outputs["gauss_features_dc"], "(b n) c h w -> b (n h w) 1 c", n=self.cfg.model.gaussians_per_pixel)
                 }
+
                 if cfg.model.max_sh_degree > 0:
                     point_clouds["features_rest"] = rearrange(outputs["gauss_features_rest"], "(b n) (sh c) h w -> b (n h w) sh c", c=3, n=self.cfg.model.gaussians_per_pixel)
 

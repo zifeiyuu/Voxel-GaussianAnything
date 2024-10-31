@@ -11,8 +11,8 @@ class Evaluator(nn.Module):
     def __init__(self, crop_border=True):
         super().__init__()
 
-        self.lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg")
-        self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
+        self.lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg").cuda()
+        self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
         self.psnr = lambda pred, gt: -10 * torch.log10(
             torch.mean((pred - gt) ** 2, dim=[1, 2, 3])
         ).mean()

@@ -152,14 +152,15 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
             # Should work in for B>1, however, be careful of reduction
             out = evaluator(pred, gt)
             if save_vis:
-                save_ply(outputs, out_dir_ply / f"{f_id}.ply", gaussians_per_pixel=model.cfg.model.gaussians_per_pixel)
+                save_ply(outputs, out_dir_ply / f"{f_id}.ply", gaussians_per_pixel=cfg.model.gaussians_per_pixel, name=cfg.model.name)
+
                 pred = pred[0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
                 gt = gt[0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
                 
                 # Save individual images
                 plt.imsave(str(out_pred_dir / f"{f_id:03}.png"), pred)
                 plt.imsave(str(out_gt_dir / f"{f_id:03}.png"), gt)
-                
+
                 # Concatenate images horizontally (splicing)
                 spliced_image = np.concatenate((gt, pred), axis=1)
                 spliced_image_uint8 = (spliced_image * 255).astype(np.uint8)
@@ -218,8 +219,14 @@ def main(cfg: DictConfig):
     print("Working dir:", output_dir)
 
     cfg.data_loader.batch_size = 1
-    cfg.data_loader.num_workers = 1
-    model = GaussianPredictor(cfg)
+    cfg.data_loader.num_workers = 16
+    if cfg.model.name == "unidepth":
+        model = GaussianPredictor(cfg)
+    elif cfg.model.name == "gat":
+        from models.gat_model import GATModel
+        model = GATModel(cfg)
+    else:
+        raise ValueError(f"Model {cfg.model.name} not supported")
     device = torch.device("cuda:0")
     model.to(device)
 

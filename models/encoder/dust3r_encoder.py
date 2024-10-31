@@ -68,11 +68,12 @@ class Dust3rEncoder(nn.Module):
             "enc_norm",
             "decoder_embed",
             "dec_blocks",
+            "dec_blocks2",
             "dec_norm",
             "downstream_head1",
             "downstream_head2"
         ]
-        modules_to_delete = ["downstream_head2", "prediction_head"]
+        modules_to_delete = ["downstream_head2", "prediction_head", "mask_token"]
         modules_to_freeze = ["patch_embed"]
         
         enc_dim = self.dust3r.enc_embed_dim
@@ -83,6 +84,7 @@ class Dust3rEncoder(nn.Module):
             modules_to_delete += [
                 "decoder_embed",
                 "dec_blocks",
+                "dec_blocks2",
                 "dec_norm",
                 "downstream_head1"
             ]
@@ -90,18 +92,18 @@ class Dust3rEncoder(nn.Module):
             self.pts_head = nn.Sequential(
                 nn.Linear(enc_dim, 3 * self.patch_size**2)
             )
-            self.parameters_to_train += [{"params": self.pts_head.parameters()}]
+            self.parameters_to_train += [{"params": list(self.pts_head.parameters())}]
 
         self.pts_feat_head = nn.Sequential(
             nn.Linear(enc_dim, self.pts_feat_dim * self.patch_size**2)
         )
-        self.parameters_to_train += [{"params": self.pts_feat_head.parameters()}]
+        self.parameters_to_train += [{"params": list(self.pts_feat_head.parameters())}]
 
         # freeze ,delete and add modules
         if cfg.model.backbone.freeze_encoder:
             modules_to_freeze += ["enc_blocks", "enc_norm"]
         if cfg.model.backbone.freeze_decoder:
-            modules_to_freeze += ["decoder_embed", "dec_blocks", "dec_norm"]
+            modules_to_freeze += ["decoder_embed", "dec_blocks", "dec_blocks2", "dec_norm"]
         if cfg.model.backbone.freeze_head:
             modules_to_freeze += ["downstream_head1"]
 
@@ -111,20 +113,23 @@ class Dust3rEncoder(nn.Module):
             elif module in modules_to_freeze:
                 freeze_all_params(getattr(self.dust3r, module))
             else:
-                self.parameters_to_train += [{"params": getattr(self.dust3r, module).parameters()}]
+                self.parameters_to_train += [{"params": list(getattr(self.dust3r, module).parameters())}]
 
     def get_parameter_groups(self):
         return self.parameters_to_train
     
     def forward(self, inputs):
         images = inputs[('color_aug', 0, 0)]
+        images2 = inputs[('color_aug', 3, 0)]
         B, C, H, W = images.shape
         true_shape = inputs.get('true_shape', torch.tensor(images.shape[-2:])[None].repeat(B, 1))
 
         # vit encoder to get per-image features
         encoded_x, pos, _ = self.dust3r._encode_image(images, true_shape)
+        # encoded_x2, pos2, _ = self.dust3r._encode_image(images2, true_shape)
         if self.use_dust3r_decoder:
             # get the feature of the final layer of the decoder head
+            # decoder_outputs1, decoder_outputs2 = self.dust3r._decoder(encoded_x, pos, encoded_x2, pos2)
             decoder_outputs, _ = self.dust3r._decoder(encoded_x, pos, encoded_x, pos)
             outputs = self.dust3r.downstream_head1(decoder_outputs, (true_shape.min(), true_shape.max()))
             pts3d, conf = outputs['pts3d'], outputs['conf'] # (B, H, W, 3) and (B, H, W)

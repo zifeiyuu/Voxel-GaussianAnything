@@ -10,13 +10,13 @@ config:
   file: "config.yaml"
 
 data_loader:
-  batch_size: 8
+  batch_size: 4
   num_workers: 16
 
 train:
   logging: false 
   mixed_precision: 32-true #32-true, 16-mixed
-  num_gpus: [1, 2, 3, 4, 5, 6, 7]
+  num_gpus: [1, 2, 3]
   load_weights_folder:
   ema:
     use: true
@@ -49,7 +49,7 @@ scene_ids: []
 output_path: ./output
 
 #ckpt path could be defined by user now
-ckpt_path: ./exp/checkpoints  #./exp/re10k_v2/checkpoints
+ckpt_path: ./exp/re10k_v2/checkpoints  #./exp/re10k_v2/checkpoints
 
 add_mask: false #only used with depth input(scannetpp)
 

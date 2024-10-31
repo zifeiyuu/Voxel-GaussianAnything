@@ -159,12 +159,27 @@ def export_ply(
     PlyData([PlyElement.describe(elements, "vertex")]).write(path)
 
 
-def save_ply(outputs, path, gaussians_per_pixel=3):
-    means = rearrange(outputs["gauss_means"], "(b v) c n -> b (v n) c", v=gaussians_per_pixel)[0, :, :3]
-    scales = rearrange(outputs["gauss_scaling"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
-    rotations = rearrange(outputs["gauss_rotation"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
-    opacities = rearrange(outputs["gauss_opacity"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
-    harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
+def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
+    if name == "unidepth":
+        means = rearrange(outputs["gauss_means"], "(b v) c n -> b (v n) c", v=gaussians_per_pixel)[0, :, :3]
+        scales = rearrange(outputs["gauss_scaling"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
+        rotations = rearrange(outputs["gauss_rotation"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
+        opacities = rearrange(outputs["gauss_opacity"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
+        harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
+    elif name == "gat":
+        # "xyz": rearrange(pos, "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
+        # "opacity": rearrange(outputs["gauss_opacity"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
+        # "scaling": rearrange(outputs["gauss_scaling"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
+        # "rotation": rearrange(outputs["gauss_rotation"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
+        # "features_dc": rearrange(outputs["gauss_features_dc"], "b n c l -> b (n l) 1 c", n=self.cfg.model.gaussians_per_pixel)
+        means = rearrange(outputs["gauss_means"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0, :, :3]
+        scales = rearrange(outputs["gauss_scaling"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
+        rotations = rearrange(outputs["gauss_rotation"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
+        opacities = rearrange(outputs["gauss_opacity"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
+        harmonics = rearrange(outputs["gauss_features_dc"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
+    else:
+        return -1
+
 
     export_ply(
         means,

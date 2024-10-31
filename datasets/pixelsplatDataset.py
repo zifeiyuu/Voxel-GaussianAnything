@@ -54,7 +54,13 @@ class pixelsplatDataset(Dataset):
         self.max_fov = cfg.dataset.max_fov
         self.interp = Image.LANCZOS
         # self.loader = pil_loader
-        self.to_tensor = T.ToTensor()
+        if cfg.dataset.normalize:
+            self.to_tensor = T.Compose([
+                T.ToTensor(),
+                T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+            ])
+        else:
+            self.to_tensor = T.ToTensor()
 
         self.specific_files = self.cfg.dataset.get('specific_files', []) 
         

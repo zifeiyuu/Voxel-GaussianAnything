@@ -21,6 +21,7 @@ skip_bad_shape: true
 dilation: random
 max_dilation: 15 #choose random target frame, maximum gap
 pad_border_aug: 0
+normalize: false
 subset: -1  # use subset frames for small set overfitting
 
 frame_sampling_method: random
