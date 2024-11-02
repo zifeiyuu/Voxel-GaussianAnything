@@ -166,7 +166,7 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         rotations = rearrange(outputs["gauss_rotation"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         opacities = rearrange(outputs["gauss_opacity"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
-    elif name == "gat":
+    elif name == "gat" or name == "rgb_unidepth":
         # "xyz": rearrange(pos, "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
         # "opacity": rearrange(outputs["gauss_opacity"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
         # "scaling": rearrange(outputs["gauss_scaling"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),

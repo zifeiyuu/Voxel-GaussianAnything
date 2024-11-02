@@ -17,6 +17,7 @@ from unidepth.utils.geometric import flat_interpolate, generate_rays
 from unidepth.utils.misc import max_stack
 from unidepth.utils.sht import rsh_cart_8
 
+from IPython import embed
 
 class ListAdapter(nn.Module):
     def __init__(self, input_dims: List[int], hidden_dim: int):

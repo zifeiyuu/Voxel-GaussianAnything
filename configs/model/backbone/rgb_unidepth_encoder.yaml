@@ -1,0 +1,8 @@
+
+name: unidepth
+
+pts_feat_dim: 32
+use_unidepth_decoder: true
+freeze_encoder: true
+freeze_decoder: true
+freeze_head: true

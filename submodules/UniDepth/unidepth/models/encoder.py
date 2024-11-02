@@ -179,6 +179,10 @@ def dinov2_vitl14(config, pretrained: str = "", **kwargs):
     DINOv2 ViT-L/14 model (optionally) pretrained on the LVD-142M dataset.
     """
     vit = _make_dinov2_model(
+
+        # img_size = 512,
+        # patch_size = 16,
+
         arch_name="vit_large",
         pretrained=config["pretrained"],
         output_idx=config.get("output_idx", [5, 12, 18, 24]),

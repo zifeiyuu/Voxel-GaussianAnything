@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from IPython import embed
 
 
 RESNETS = {18: (models.resnet18, models.ResNet18_Weights.IMAGENET1K_V1),

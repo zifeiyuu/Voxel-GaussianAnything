@@ -60,6 +60,7 @@ class Dust3rEncoder(nn.Module):
             print("MASt3R loaded!")
         else:
             raise ValueError(f"Unknown version of Dust3r: {version}")
+        
 
         self.parameters_to_train = []
         all_dust3r_modules = [
@@ -120,7 +121,6 @@ class Dust3rEncoder(nn.Module):
     
     def forward(self, inputs):
         images = inputs[('color_aug', 0, 0)]
-        images2 = inputs[('color_aug', 3, 0)]
         B, C, H, W = images.shape
         true_shape = inputs.get('true_shape', torch.tensor(images.shape[-2:])[None].repeat(B, 1))
 

@@ -17,7 +17,7 @@ class LinearHead(nn.Module):
         self.num_output_channels = sum(self.split_dimensions)
 
         # linear decoder
-        self.gaussian_head = nn.Linear(self.in_dim + 3, self.num_output_channels)
+        self.gaussian_head = nn.Linear(self.in_dim + 3 + 3, self.num_output_channels)
 
         # gaussian parameters initialisation
         start_channel = 0

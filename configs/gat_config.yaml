@@ -1,7 +1,7 @@
 defaults:
   - _self_
   - hydra: defaults
-  - model: gat_model
+  - model: rgb_unidepth_model #gat_model
   - dataset: pixelsplat
   - loss: [reconstruction, regularization]  ## originally only [reconstruction] loss
 
@@ -42,7 +42,7 @@ run:
 
 #new
 #evaluation results save config
-save_vis: false
+save_vis: true
 video_mode: false
 original_video: false
 scene_ids: []

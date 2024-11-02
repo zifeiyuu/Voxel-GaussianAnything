@@ -7,8 +7,8 @@ preload_depths: false
 ransac_on_the_fly: false
 test_split_path: splits/re10k_mine_filtered/val_files.txt
 
-height: 256
-width: 384
+height: 448 #256 448 384 [462, 616]
+width: 672 #384 672 608
 
 znear: 0.01
 zfar: 100.0

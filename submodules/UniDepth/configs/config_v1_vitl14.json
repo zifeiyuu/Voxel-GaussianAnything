@@ -4,7 +4,7 @@
     },
     "training": {},
     "data": {
-        "image_shape": [462, 616]
+        "image_shape": [448, 672] 
     },
     "model": {
         "name": "UniDepthV1",

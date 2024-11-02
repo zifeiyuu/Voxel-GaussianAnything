@@ -27,6 +27,9 @@ class Trainer(nn.Module):
         elif cfg.model.name == "gat":
             from models.gat_model import GATModel
             self.model = GATModel(cfg)
+        elif cfg.model.name == "rgb_unidepth":
+            from models.gat_model import GATModel
+            self.model = GATModel(cfg)
         else:
             raise ValueError(f"Model {cfg.model.name} not supported")
 

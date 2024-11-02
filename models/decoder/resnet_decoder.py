@@ -6,7 +6,7 @@ from collections import OrderedDict
 from models.encoder.layers import *
 from models.decoder.gaussian_decoder import get_splits_and_inits, GaussianDecoder
 
-
+from IPython import embed
 class ResnetDecoder(nn.Module):
     """Pytorch module for a resnet decoder"""
     def __init__(self, cfg, num_ch_enc, use_skips=True):

@@ -8,6 +8,7 @@ from einops import rearrange
 
 from .encoder.layers import BackprojectDepth
 from .encoder.dust3r_encoder import Dust3rEncoder
+from .encoder.rgb_unidepth_encoder import Rgb_unidepth_Encoder
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from .base_model import BaseModel
 from .heads.gat_head import LinearHead
@@ -41,6 +42,9 @@ class GATModel(BaseModel):
         # define the model
         if "dust3r" in cfg.model.backbone.name:
             self.encoder = Dust3rEncoder(cfg)
+        elif "unidepth" in cfg.model.backbone.name:
+            self.encoder = Rgb_unidepth_Encoder(cfg)
+            
         self.parameters_to_train += self.encoder.get_parameter_groups()
 
         self.use_decoder_3d = cfg.model.use_decoder_3d
@@ -58,13 +62,15 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d, pts_feat = self.encoder(inputs) # (B, N, 3) and (B, N, C)
+        pts3d, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3) and (B, N, C)
 
         if self.use_decoder_3d:
             pts3d, pts_feat = self.decoder_3d(pts3d, pts_feat)
+            pts_rgb = pts_feat################ 
 
+        
         # predict gaussian parameters for each point
-        outputs = self.gaussian_head(torch.cat([pts3d, pts_feat], dim=-1))
+        outputs = self.gaussian_head(torch.cat([pts3d, pts_rgb, pts_feat], dim=-1))
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         # outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
