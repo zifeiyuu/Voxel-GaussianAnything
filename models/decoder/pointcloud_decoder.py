@@ -12,7 +12,6 @@ class PointTransformerDecoder(nn.Module):
         super().__init__()
         self.cfg = cfg
         feat_dim = cfg.model.backbone.pts_feat_dim
-        assert feat_dim == cfg.model.decoder_3d.in_channels
 
         kw = dict(copy.deepcopy(cfg.model.decoder_3d))
         kw.pop("name")

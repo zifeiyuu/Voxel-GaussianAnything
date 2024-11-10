@@ -8,6 +8,8 @@ from einops import rearrange
 from models.encoder.resnet_encoder import ResnetEncoder
 from models.decoder.resnet_decoder import ResnetDecoder, ResnetDepthDecoder
 
+from IPython import embed
+
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 
 unidepth_path = os.path.join(base_dir, 'submodules/UniDepth')

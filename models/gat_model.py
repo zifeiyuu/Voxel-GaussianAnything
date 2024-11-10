@@ -11,13 +11,15 @@ from .encoder.dust3r_encoder import Dust3rEncoder
 from .encoder.rgb_unidepth_encoder import Rgb_unidepth_Encoder
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from .base_model import BaseModel
-from .heads.gat_head import LinearHead
+from .heads.gat_head import LinearHead, Vit_Head
+from .heads import head_factory
 from misc.util import add_source_frame_id
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
 
 from .decoder.pointcloud_decoder import PointTransformerDecoder
 
 from IPython import embed
+from models.decoder.resnet_decoder import ResnetDecoder
 
 def default_param_group(model):
     return [{'params': model.parameters()}]
@@ -36,6 +38,7 @@ class GATModel(BaseModel):
         self.cfg = cfg
         # checking height and width are multiples of 32
         assert cfg.dataset.width % 32 == 0 and cfg.dataset.height % 32 == 0, "'width' and 'height' must be a multiple of 32"
+        self.use_dust3r = cfg.model.backbone.use_dust3r
 
         self.parameters_to_train = []
 
@@ -51,9 +54,12 @@ class GATModel(BaseModel):
         if self.use_decoder_3d:
             self.decoder_3d = PointTransformerDecoder(cfg)
             self.parameters_to_train += self.decoder_3d.get_parameter_groups()
-        
-        self.gaussian_head = LinearHead(cfg)
-        self.parameters_to_train += [{'params': list(self.gaussian_head.parameters())}]
+
+        if not self.use_dust3r:
+            self.decoder_gs = LinearHead(cfg)
+        else:
+            self.decoder_gs = Vit_Head(cfg, self.encoder.dust3r)
+        self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
 
     def forward(self, inputs):
@@ -62,19 +68,21 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3) and (B, N, C)
+        pts3d, pts3d_hw, pts_feat, pos, pts_rgb = self.encoder(inputs) # (B, N, 3) and (B, N, C)
 
         if self.use_decoder_3d:
-            pts3d, pts_feat = self.decoder_3d(pts3d, pts_feat)
-            pts_rgb = pts_feat################ 
-
-        
+            pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
+            
         # predict gaussian parameters for each point
-        outputs = self.gaussian_head(torch.cat([pts3d, pts_rgb, pts_feat], dim=-1))
+        if not self.use_dust3r:
+            outputs = self.decoder_gs(torch.cat([pts_feat, pts3d, pts_rgb], dim=-1))
+        else:
+            outputs = self.decoder_gs(pts_feat, pos, pts3d_hw, inputs)
+
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         # outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
-        outputs["gauss_means"] = pts3d_reshape
+        outputs["gauss_means"] = pts3d_reshape[:, :, :3, :]
 
         if cfg.model.gaussian_rendering:
             self.process_gt_poses(inputs, outputs)

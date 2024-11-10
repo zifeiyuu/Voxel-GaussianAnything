@@ -14,7 +14,7 @@ from misc.util import sec_to_hm_str
 from models.encoder.layers import SSIM
 from evaluate import evaluate, get_model_instance
 from src.splatt3r_src.loss_mask import calculate_in_frustum_mask_single
-
+from torch.utils.tensorboard import SummaryWriter
 
 class Trainer(nn.Module):
     def __init__(self, cfg):
@@ -41,6 +41,8 @@ class Trainer(nn.Module):
         base_dir = Path(__file__).resolve().parent
         self.output_path = base_dir / cfg.output_path
         self.output_path.resolve()
+        # Initialize TensorBoard
+        self.writer = SummaryWriter(log_dir=str(self.output_path / 'tensorboard' / str(time.time())))
 
     def set_logger(self, logger):
         self.logger = logger

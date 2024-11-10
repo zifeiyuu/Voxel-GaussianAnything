@@ -1,7 +1,7 @@
 defaults:
   - _self_
   - hydra: defaults
-  - model: rgb_unidepth_model #gat_model
+  - model: rgb_unidepth_model #gat_model rgb_unidepth_model
   - dataset: pixelsplat
   - loss: [reconstruction, regularization]  ## originally only [reconstruction] loss
 

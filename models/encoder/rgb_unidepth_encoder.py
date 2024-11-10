@@ -11,8 +11,10 @@ from einops import rearrange
 from .resnet_encoder import ResnetEncoder
 from ..decoder.resnet_decoder import ResnetDecoder, ResnetDepthDecoder
 from IPython import embed
-from .layers import BackprojectDepth
 from .geometric import generate_rays
+from .helper import SimpleTransformer, freeze_all_params, _paddings, _shapes, _preprocess, _postprocess
+from .layers import BackprojectDepth
+from ..heads import head_factory
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 unidepth_path = os.path.join(base_dir, 'submodules/UniDepth')
@@ -22,99 +24,25 @@ from unidepth.utils.constants import (IMAGENET_DATASET_MEAN,
                                       IMAGENET_DATASET_STD)
 sys.path.pop(0)
 
-def freeze_all_params(modules):
-    if isinstance(modules, list) or isinstance(modules, tuple):
-        for module in modules:
-            try:
-                for n, param in module.named_parameters():
-                    param.requires_grad = False
-            except AttributeError:
-                # module is directly a parameter
-                module.requires_grad = False
-    else:
-        assert isinstance(modules, nn.Module)
-        try:
-            for n, param in modules.named_parameters():
-                param.requires_grad = False
-        except AttributeError:
-            # module is directly a parameter
-            modules.requires_grad = False
+dust3r_path = os.path.join(base_dir, 'submodules/dust3r')
+sys.path.insert(0, dust3r_path)
+from dust3r.model import AsymmetricCroCo3DStereo
+sys.path.pop(0)
 
-# inference helpers
-def _paddings(image_shape, network_shape):
-    cur_h, cur_w = image_shape
-    h, w = network_shape
-    pad_top, pad_bottom = (h - cur_h) // 2, h - cur_h - (h - cur_h) // 2
-    pad_left, pad_right = (w - cur_w) // 2, w - cur_w - (w - cur_w) // 2
-    return pad_left, pad_right, pad_top, pad_bottom
-
-
-def _shapes(image_shape, network_shape):
-    h, w = image_shape
-    input_ratio = w / h
-    output_ratio = network_shape[1] / network_shape[0]
-    if output_ratio > input_ratio:
-        ratio = network_shape[0] / h
-    elif output_ratio <= input_ratio:
-        ratio = network_shape[1] / w
-    return (ceil(h * ratio - 0.5), ceil(w * ratio - 0.5)), ratio
-
-
-def _preprocess(rgbs, intrinsics, shapes, pads, ratio, output_shapes):
-    (pad_left, pad_right, pad_top, pad_bottom) = pads
-    rgbs = F.interpolate(
-        rgbs, size=shapes, mode="bilinear", align_corners=False, antialias=True
-    )
-    rgbs = F.pad(rgbs, (pad_left, pad_right, pad_top, pad_bottom), mode="constant")
-    if intrinsics is not None:
-        intrinsics = intrinsics.clone()
-        intrinsics[:, 0, 0] = intrinsics[:, 0, 0] * ratio
-        intrinsics[:, 1, 1] = intrinsics[:, 1, 1] * ratio
-        intrinsics[:, 0, 2] = intrinsics[:, 0, 2] * ratio + pad_left
-        intrinsics[:, 1, 2] = intrinsics[:, 1, 2] * ratio + pad_top
-        return rgbs, intrinsics
-    return rgbs, None
-
-def _postprocess(predictions, intrinsics, shapes, pads, ratio, original_shapes):
-    (pad_left, pad_right, pad_top, pad_bottom) = pads
-    # pred mean, trim paddings, and upsample to input dim
-    predictions = sum(
-        [
-            F.interpolate(
-                x.clone(),
-                size=shapes,
-                mode="bilinear",
-                align_corners=False,
-                antialias=True,
-            )
-            for x in predictions
-        ]
-    ) / len(predictions)
-
-    predictions = predictions[
-        ..., pad_top : shapes[0] - pad_bottom, pad_left : shapes[1] - pad_right
-    ]
-    predictions = F.interpolate(
-        predictions,
-        size=original_shapes,
-        mode="bilinear",
-        align_corners=False,
-        antialias=True,
-    )
-    intrinsics[:, 0, 0] = intrinsics[:, 0, 0] / ratio
-    intrinsics[:, 1, 1] = intrinsics[:, 1, 1] / ratio
-    intrinsics[:, 0, 2] = (intrinsics[:, 0, 2] - pad_left) / ratio
-    intrinsics[:, 1, 2] = (intrinsics[:, 1, 2] - pad_top) / ratio
-    return predictions, intrinsics
-
-
+mast3r_path = os.path.join(base_dir, 'submodules/mast3r')
+sys.path.insert(0, mast3r_path)
+from mast3r.model import AsymmetricMASt3R
+sys.path.pop(0)
 
 class Rgb_unidepth_Encoder(nn.Module):
     def __init__(self, cfg):
         super().__init__()
 
         self.cfg = cfg
+        self.patch_size = 14  #hard code!! to fit dino v2 l14, don't know how to change patch size inside. default patch size in dust3r encoder is 16 != 14
+        self.pts_feat_dim = cfg.model.backbone.pts_feat_dim
         self.use_unidepth_decoder = cfg.model.backbone.use_unidepth_decoder
+        self.use_decoder_3d = cfg.model.use_decoder_3d
 
         self.unidepth = UniDepth(
             version=cfg.model.depth.version, 
@@ -122,7 +50,6 @@ class Rgb_unidepth_Encoder(nn.Module):
             pretrained=True
         )
         # self.unidepth.image_shape = [cfg.dataset.height, cfg.dataset.width]
-        
         print("Unidepth_v1 loaded!")
         self.set_backproject()
 
@@ -131,41 +58,93 @@ class Rgb_unidepth_Encoder(nn.Module):
             "pixel_encoder",
             "pixel_decoder"
         ]
-        modules_to_delete = []
-        modules_to_freeze = []
-
-        self.pts_feat_dim = cfg.model.backbone.pts_feat_dim
-        self.patch_size = self.unidepth.pixel_encoder.patch_size
-        enc_dim = self.unidepth.pixel_encoder.embed_dim
+        modules_to_delete_unidepth = []
+        modules_to_freeze_unidepth = []
 
         if not self.use_unidepth_decoder:
-            modules_to_delete += ["pixel_decoder"]
+            modules_to_delete_unidepth += ["pixel_decoder"]
 
             self.pts_head = nn.Sequential(
                 nn.Linear(enc_dim, 1 * self.patch_size**2)
             )
             self.parameters_to_train += [{"params": list(self.pts_head.parameters())}]
 
-        self.pts_feat_head = nn.Sequential(
-            nn.Linear(enc_dim, self.pts_feat_dim * self.patch_size**2)
-        )
-        self.parameters_to_train += [{"params": list(self.pts_feat_head.parameters())}]
-
         # freeze ,delete and add modules
-        if cfg.model.backbone.freeze_encoder:
-            modules_to_freeze += ["pixel_encoder"]
-        if cfg.model.backbone.freeze_decoder:
-            modules_to_freeze += ["pixel_decoder"]
-        if cfg.model.backbone.freeze_head:
-            modules_to_freeze += []
+        if cfg.model.backbone.unidepth.freeze_encoder:
+            modules_to_freeze_unidepth += ["pixel_encoder"]
+        if cfg.model.backbone.unidepth.freeze_decoder:
+            modules_to_freeze_unidepth += ["pixel_decoder"]
+        if cfg.model.backbone.unidepth.freeze_head:
+            modules_to_freeze_unidepth += []
 
         for module in all_unidepth_modules:
-            if module in modules_to_delete:
+            if module in modules_to_delete_unidepth:
                 delattr(self.unidepth, module)
-            elif module in modules_to_freeze:
+            elif module in modules_to_freeze_unidepth:
                 freeze_all_params(getattr(self.unidepth, module))
             else:
                 self.parameters_to_train += [{"params": list(getattr(self.unidepth, module).parameters())}]
+
+        # #add a simple transformer decoder
+        # self.transformer_decoder = SimpleTransformer(embed_dim=1024, num_heads=8, num_layers=6)
+        # self.parameters_to_train += [{"params": list(self.transformer_decoder.parameters())}]
+
+
+        self.use_dust3r = cfg.model.backbone.use_dust3r
+        version = cfg.model.backbone.version
+
+        if self.use_dust3r:
+            # hardcoding the model name for now
+            if "dust3r" in version:
+                model_name = "DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+                self.dust3r = AsymmetricCroCo3DStereo.from_pretrained(f"naver/{model_name}")
+                print("DUSt3R loaded!")
+            elif "mast3r" in version:
+                model_name = "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
+                self.dust3r = AsymmetricMASt3R.from_pretrained(f"naver/{model_name}")
+                print("MASt3R loaded!")
+            else:
+                raise ValueError(f"Unknown version of Dust3r: {version}")
+
+            all_dust3r_modules = [
+                "patch_embed",
+                "enc_blocks",
+                "enc_norm",
+                "decoder_embed",
+                "dec_blocks",
+                "dec_blocks2",
+                "dec_norm",
+                "downstream_head1",
+                "downstream_head2"
+            ]
+            modules_to_delete_dust3r = ["downstream_head1", "downstream_head2", "prediction_head", "mask_token"]
+            modules_to_freeze_dust3r = ["patch_embed"]
+
+            # freeze ,delete and add modules
+            if cfg.model.backbone.dust3r.freeze_encoder:
+                modules_to_freeze_dust3r += ["enc_blocks", "enc_norm"]
+            if cfg.model.backbone.dust3r.freeze_decoder:
+                modules_to_freeze_dust3r += ["decoder_embed", "dec_blocks", "dec_blocks2", "dec_norm"]
+            if cfg.model.backbone.dust3r.freeze_head:
+                modules_to_freeze_dust3r += []
+
+            for module in all_dust3r_modules:
+                if module in modules_to_delete_dust3r:
+                    delattr(self.dust3r, module)
+                elif module in modules_to_freeze_dust3r:
+                    freeze_all_params(getattr(self.dust3r, module))
+                else:
+                    self.parameters_to_train += [{"params": list(getattr(self.dust3r, module).parameters())}]
+
+        if not self.use_dust3r:
+            enc_dim = self.unidepth.pixel_encoder.embed_dim        
+        else:
+            enc_dim = self.dust3r.enc_embed_dim
+            self.patch_size = 16 #hard code
+        self.pts_feat_head = nn.Sequential(
+            nn.Linear(enc_dim, self.pts_feat_dim * self.patch_size**2)
+        )        
+        self.parameters_to_train += [{"params": list(self.pts_feat_head.parameters())}]
 
     def get_parameter_groups(self):
         return self.parameters_to_train
@@ -222,94 +201,98 @@ class Rgb_unidepth_Encoder(nn.Module):
     def forward(self, inputs):
         #rgb
         rgbs = inputs["color_aug", 0, 0]
-
         #use gt intrinsics
         gt_K = inputs[("K_src", 0)]
         inv_K = torch.linalg.inv(gt_K.float())
-
         if rgbs.ndim == 3:
             rgbs = rgbs.unsqueeze(0)
         if gt_K is not None and gt_K.ndim == 2:
             gt_K = gt_K.unsqueeze(0)
-        B, _, H, W = rgbs.shape
-        
+        B, C, H, W = rgbs.shape
+        true_shape = inputs.get('true_shape', torch.tensor(rgbs.shape[-2:])[None].repeat(B, 1))
+
+        self.reshape = False
+        if (H != self.unidepth.image_shape[0] or W != self.unidepth.image_shape[1]):
+            self.reshape = True
         #if want to reshape
         (h, w), ratio = _shapes((H, W), self.unidepth.image_shape)
         pad_left, pad_right, pad_top, pad_bottom = _paddings((h, w), self.unidepth.image_shape)
-
-        # rgbs, gt_K = self.preprocess(rgbs, gt_K, pad_left, pad_right, pad_top, pad_bottom)
+        if self.reshape:
+            rgbs_reshaped, gt_K_reshaped = self.preprocess(rgbs, gt_K, pad_left, pad_right, pad_top, pad_bottom)
+        else:
+            rgbs_reshaped = rgbs
+            gt_K_reshaped = gt_K
 
         # vit encoder to get per-image features
         # Encode
-        original_encoder_outputs, cls_tokens = self.unidepth.pixel_encoder(rgbs) #list[torch.Size([3, 462 / 14, 616 / 14, 1024])], len = 24, (B, H / P, W / P, EMBED_DIM)
+        original_encoder_outputs, cls_tokens = self.unidepth.pixel_encoder(rgbs_reshaped) #list[torch.Size([3, 462 / 14, 616 / 14, 1024])], len = 24, (B, H / P, W / P, EMBED_DIM)
         if "dino" in self.unidepth.pixel_encoder.__class__.__name__.lower():
             original_encoder_outputs = [
                 (x + y.unsqueeze(1)).contiguous()
                 for x, y in zip(original_encoder_outputs, cls_tokens)
             ]
 
-        #from list to single tensor##?
-        encoder_outputs = [x.contiguous() for x in original_encoder_outputs]
-        if len(encoder_outputs) == 1:
-            encoder_outputs = encoder_outputs[0]
-        else:
-            encoder_outputs = torch.stack(encoder_outputs, dim=-1).max(dim=-1).values  #(B, H / P, W / P, EMBED_DIM)
-
         if self.use_unidepth_decoder:
             inputs = {}
-            inputs["image"] = rgbs
+            inputs["image"] = rgbs_reshaped
             inputs["encoder_outputs"] = original_encoder_outputs
             inputs["cls_tokens"] = cls_tokens
             # Get camera infos
             rays, angles = generate_rays(
-                gt_K, self.unidepth.image_shape, noisy=self.training
+                gt_K_reshaped, self.unidepth.image_shape, noisy=self.training
             )
             inputs["rays"] = rays
             inputs["angles"] = angles
-            inputs["K"] = gt_K
+            inputs["K"] = gt_K_reshaped
             self.unidepth.pixel_decoder.test_fixed_camera = True  # use GT camera in fwd
 
             # decode all, get the feature of the final layer of the decoder
             pred_intrinsics, predictions, _ = self.unidepth.pixel_decoder(inputs, {})  
 
-            # predictions, pred_intrinsics = _postprocess(
-            #     predictions,
-            #     pred_intrinsics,
-            #     self.unidepth.image_shape,
-            #     (pad_left, pad_right, pad_top, pad_bottom),
-            #     ratio,
-            #     (H, W),
-            # )
-
-            predictions = sum(
-                [
-                    F.interpolate(
-                        x.clone(),
-                        size=self.unidepth.image_shape,
-                        mode="bilinear",
-                        align_corners=False,
-                        antialias=True,
-                    )
-                    for x in predictions
-                ]
-            ) / len(predictions)
+            if self.reshape:
+                predictions, pred_intrinsics = _postprocess(
+                    predictions,
+                    pred_intrinsics,
+                    self.unidepth.image_shape,
+                    (pad_left, pad_right, pad_top, pad_bottom),
+                    ratio,
+                    (H, W),
+                )
+            else:
+                predictions = sum(
+                    [
+                        F.interpolate(
+                            x.clone(),
+                            size=self.unidepth.image_shape,
+                            mode="bilinear",
+                            align_corners=False,
+                            antialias=True,
+                        )
+                        for x in predictions
+                    ]
+                ) / len(predictions)
 
             # Output data, use for loss computation
-            outputs = {
-                "depth": predictions[:, -1:],                
-                "intrinsics": pred_intrinsics
-            }
             self.unidepth.pixel_decoder.test_fixed_camera = False
+            original_pts_depth, pred_K = predictions[:, -1:], pred_intrinsics  #B C H W
+            pts_depth = rearrange(original_pts_depth, 'b c h w -> b (h w) c') #B (H W) C
 
-            pts_depth, pred_K = outputs["depth"], outputs["intrinsics"]  #B C H W
-            pts_depth = rearrange(pts_depth, 'b c h w -> b (h w) c') #B (H W) C
+            #from list to single tensor##? last transformer layer output
+            pos = None
+            encoder_outputs = original_encoder_outputs[-1]
+            # encoder_outputs = self.transformer_decoder(encoder_outputs)
 
-            pts_feat = self.pts_feat_head(encoder_outputs)  # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*D)
-            pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)
-
+            if not self.use_dust3r:
+                pts_feat = self.pts_feat_head(encoder_outputs)  # (B, H / P,  W / P, EMBED_DIM) ->(B, H / P,  W / P, p^2*D)
+                pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)                
+            else:
+                pts_feat, pos, _ = self.dust3r._encode_image(rgbs, true_shape)
+                if self.use_decoder_3d:
+                    pts_feat = self.pts_feat_head(pts_feat) # (B, N, p^2*D)
+                    pts_feat = rearrange(pts_feat, 'b n (p d) -> b (n p) d', p=self.patch_size**2, d=self.pts_feat_dim)
         else:
             # linear layer to decode
-            pts_depth = self.pts_head(encoder_outputs) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*1)
+            pts_depth = self.pts_head(original_encoder_outputs[-1]) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*1)
             pts_depth = rearrange(pts_depth, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=1)
             pts_feat = self.pts_feat_head(encoder_outputs) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*D)
             pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)
@@ -319,8 +302,10 @@ class Rgb_unidepth_Encoder(nn.Module):
         scale = self.cfg.model.scales[0]
         pts3d = self.backproject_depth[str(scale)](pts_depth, inv_K)
         pts3d = rearrange(pts3d, 'b c n -> b n c')[:, :, :3]
+        pts3d_hw = rearrange(pts3d, 'b (h w) c -> b c h w', h=H, w=W)
 
         #directly give decoder rgb information for each 3d point
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
-
-        return pts3d, pts_feat, pts_rgb #,rgbs #need original color information??
+        
+        
+        return pts3d, pts3d_hw, pts_feat, pos, pts_rgb 

@@ -4,6 +4,7 @@ import numpy as np
 from einops import rearrange
 from collections import OrderedDict
 from ..decoder.gaussian_decoder import GaussianDecoder, get_splits_and_inits
+from ..heads import head_factory
 from IPython import embed
 
 class LinearHead(nn.Module):
@@ -16,8 +17,11 @@ class LinearHead(nn.Module):
         self.split_dimensions, scales, biases = get_splits_and_inits(cfg)
         self.num_output_channels = sum(self.split_dimensions)
 
+        self.parameters_to_train = []
+
         # linear decoder
         self.gaussian_head = nn.Linear(self.in_dim + 3 + 3, self.num_output_channels)
+        self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
 
         # gaussian parameters initialisation
         start_channel = 0
@@ -30,6 +34,10 @@ class LinearHead(nn.Module):
 
         # gaussian parameters activation
         self.gaussian_decoder = GaussianDecoder(cfg)
+        self.parameters_to_train += [{"params": self.gaussian_decoder.parameters()}]
+
+    def get_parameter_groups(self):
+        return self.parameters_to_train
     
     def forward(self, pts_with_feats):
         gaussian_params = self.gaussian_head(pts_with_feats)
@@ -41,3 +49,40 @@ class LinearHead(nn.Module):
 
         return out
 
+class Vit_Head(nn.Module):
+    def __init__(self, cfg, dust3r_model):
+        super().__init__()
+
+        self.cfg = cfg
+        self.in_dim = cfg.model.backbone.pts_feat_dim
+
+        self.split_dimensions, scales, biases = get_splits_and_inits(cfg)
+        self.num_output_channels = sum(self.split_dimensions)
+
+        self.dust3r = dust3r_model
+
+        self.parameters_to_train = []
+
+        self.gaussian_head = head_factory('dpt_gs', 'gs_params', self.dust3r, has_conf=False, out_nchan=self.num_output_channels)
+        self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
+
+        # gaussian parameters activation
+        self.gaussian_decoder = GaussianDecoder(cfg)
+        self.parameters_to_train += [{"params": self.gaussian_decoder.parameters()}]
+
+    def get_parameter_groups(self):
+        return self.parameters_to_train
+    
+    def forward(self, encoded_x, pos, pts3d, inputs):
+        dec, _ = self.dust3r._decoder(encoded_x, pos, encoded_x, pos)
+
+        rgbs = inputs["color_aug", 0, 0]
+        B, C, H, W = rgbs.shape
+        true_shape = inputs.get('true_shape', torch.tensor(rgbs.shape[-2:])[None].repeat(B, 1))
+        gaussian_params = self.gaussian_head([tok.float() for tok in dec], pts3d, rgbs[:, :3], true_shape[0].cpu().tolist()) #B channel H W
+        
+        # n is the number of gaussians, d is the dimension of the gaussian parameters
+        gaussian_params = rearrange(gaussian_params, 'b d h w -> b d (h w)')
+        out = self.gaussian_decoder(gaussian_params, self.split_dimensions)
+
+        return out

@@ -45,6 +45,18 @@ def run_epoch(fabric,
         # instruct the model which novel frames to render
         inputs["target_frame_ids"] = cfg.model.gauss_novel_frames
         losses, outputs = trainer(inputs)
+
+        # Log losses
+        total_loss = losses["loss/total"]
+        trainer.writer.add_scalar('Loss/total', total_loss, trainer.step)
+        if cfg.model.gaussian_rendering:
+            trainer.writer.add_scalar('Loss/gaussian_regularization', losses["loss/big_gauss_reg_loss"], trainer.step)
+            if cfg.model.predict_offset:
+                trainer.writer.add_scalar('Loss/offset', losses["loss/gauss_offset_reg"], trainer.step)  
+            trainer.writer.add_scalar('Loss/reconstruction', losses["loss/rec"], trainer.step) 
+            # trainer.writer.add_scalar('Loss/rec/mse', losses["loss/rec"]["loss/mse"], trainer.step) 
+            # trainer.writer.add_scalar('Loss/rec/ssim', losses["loss/rec"]["loss/ssim"], trainer.step) 
+            # trainer.writer.add_scalar('Loss/rec/lpips', losses["loss/rec"]["loss/lpips"], trainer.step)
         
         optimiser.zero_grad(set_to_none=True)
         fabric.backward(losses["loss/total"])
@@ -71,14 +83,14 @@ def run_epoch(fabric,
             if step % cfg.run.save_frequency == 0 and step != 0:
                 trainer.model.save_model(optimiser, step, ema)
             # save the validation results
-            early_phase = (step < 6000) and (step % 100 == 0) #500
+            early_phase = (step < 6000) and (step % 500 == 0) #500
             if early_phase or step % cfg.run.val_frequency == 0:
                 with torch.no_grad():
                     model_eval = ema if ema is not None else trainer.model
                     trainer.validate(model_eval, evaluator, val_loader, device=fabric.device)
 
         # Clean up and free GPU memory
-        if early_phase or step % cfg.run.val_frequency == 0: #################@@@@@@@@@@@@@@@@
+        if early_phase or step % cfg.run.val_frequency == 0 or step % 500 == 0: #################@@@@@@@@@@@@@@@@
             torch.cuda.empty_cache()
 
         # # Clear up loss and outputs to free memory

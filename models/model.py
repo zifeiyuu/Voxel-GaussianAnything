@@ -11,6 +11,8 @@ from models.decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_p
 from misc.util import add_source_frame_id
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
 
+from IPython import embed
+
 def default_param_group(model):
     return [{'params': model.parameters()}]
 

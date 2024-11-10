@@ -175,17 +175,17 @@ class BaseModel(nn.Module):
                         K_tgt = inputs[("K_tgt", frame_id)]
                     focals_pixels = torch.diag(K_tgt[b])[:2]
                     
-                    debug = False
-                    if debug and frame_id == 0:
-                        import numpy as np
-                        image = inputs[("color", 0, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
-                        image = (image * 255).astype(np.uint8)
-                        xyz = outputs["pts3d_pred"].squeeze().transpose(0, 1).detach().cpu()
-                        debug_vis_pointcloud(xyz, K_tgt[b], H, W, image)
-                        debug_vis_pointcloud([], K_tgt[b], H, W, image)
-                        image2 = inputs[("color", 3, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
-                        image2 = (image2 * 255).astype(np.uint8)
-                        debug_vis_pointcloud([], K_tgt[b], H, W, image2)
+                    # debug = False
+                    # if debug and frame_id == 0:
+                    #     import numpy as np
+                    #     image = inputs[("color", 0, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
+                    #     image = (image * 255).astype(np.uint8)
+                    #     xyz = outputs["pts3d_pred"].squeeze().transpose(0, 1).detach().cpu()
+                    #     debug_vis_pointcloud(xyz, K_tgt[b], H, W, image)
+                    #     debug_vis_pointcloud([], K_tgt[b], H, W, image)
+                    #     image2 = inputs[("color", 3, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
+                    #     image2 = (image2 * 255).astype(np.uint8)
+                    #     debug_vis_pointcloud([], K_tgt[b], H, W, image2)
 
                     fovY = focal2fov(focals_pixels[1].item(), H)
                     fovX = focal2fov(focals_pixels[0].item(), W)

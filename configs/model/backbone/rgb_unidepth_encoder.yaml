@@ -1,8 +1,16 @@
-
 name: unidepth
 
 pts_feat_dim: 32
+
 use_unidepth_decoder: true
-freeze_encoder: true
-freeze_decoder: true
-freeze_head: true
+unidepth:
+  freeze_encoder: true
+  freeze_decoder: true
+  freeze_head: true
+
+use_dust3r: true
+version: "dust3r" # "dust3r" or "mast3r"
+dust3r:
+  freeze_encoder: false
+  freeze_decoder: false
+  freeze_head: false

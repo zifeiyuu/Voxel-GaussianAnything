@@ -61,7 +61,7 @@ class ResnetDecoder(nn.Module):
             x = torch.cat(x, dim=1)
             x = self.convs[("upconv", i, 1)](x)
         
-        x = self.out(x)
+        x = self.out(x) #（B, 23, H, W)
         out = self.gaussian_decoder(x, self.split_dimensions)
 
         return out

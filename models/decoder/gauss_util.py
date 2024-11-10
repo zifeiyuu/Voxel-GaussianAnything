@@ -14,7 +14,7 @@ import numpy as np
 import math
 from einops import einsum
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-
+from IPython import embed
 
 def debug_vis_pointcloud(xyz, K, H, W, image=None):
     if image is None:

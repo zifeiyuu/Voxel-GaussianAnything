@@ -5,10 +5,10 @@ depth_path: #/data/datasets/re10k
 unpack_pcl_tar: false
 preload_depths: false
 ransac_on_the_fly: false
-test_split_path: splits/re10k_mine_filtered/val_files.txt
+test_split_path: splits/re10k_mine_filtered/val2_files.txt
 
-height: 448 #256 448 384 [462, 616]
-width: 672 #384 672 608
+height: 256 #256 448 384 [462, 616]
+width: 384 #384 672 608
 
 znear: 0.01
 zfar: 100.0

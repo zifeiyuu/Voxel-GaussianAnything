@@ -1,6 +1,6 @@
 name: PT_decoder
 
-in_channels: 32
+in_channels: 35
 patch_embed_depth: 1
 patch_embed_channels: 32
 patch_embed_groups: 4
