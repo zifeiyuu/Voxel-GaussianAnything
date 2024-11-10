@@ -32,8 +32,6 @@ class BaseModel(nn.Module):
         super().__init__()
 
         self.cfg = cfg
-        # checking height and width are multiples of 32
-        assert cfg.dataset.width % 32 == 0 and cfg.dataset.height % 32 == 0, "'width' and 'height' must be a multiple of 32"
 
         self.parameters_to_train = []
     

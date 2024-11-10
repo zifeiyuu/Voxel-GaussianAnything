@@ -61,13 +61,20 @@ class Rgb_unidepth_Encoder(nn.Module):
         modules_to_delete_unidepth = []
         modules_to_freeze_unidepth = []
 
+        self.enc_dim = self.unidepth.pixel_encoder.embed_dim  
+
         if not self.use_unidepth_decoder:
             modules_to_delete_unidepth += ["pixel_decoder"]
 
             self.pts_head = nn.Sequential(
-                nn.Linear(enc_dim, 1 * self.patch_size**2)
+                nn.Linear(self.enc_dim, 1 * self.patch_size**2)
             )
             self.parameters_to_train += [{"params": list(self.pts_head.parameters())}]
+      
+        self.pts_feat_head = nn.Sequential(
+            nn.Linear(self.enc_dim, self.pts_feat_dim * self.patch_size**2)
+        )        
+        self.parameters_to_train += [{"params": list(self.pts_feat_head.parameters())}]
 
         # freeze ,delete and add modules
         if cfg.model.backbone.unidepth.freeze_encoder:
@@ -84,67 +91,6 @@ class Rgb_unidepth_Encoder(nn.Module):
                 freeze_all_params(getattr(self.unidepth, module))
             else:
                 self.parameters_to_train += [{"params": list(getattr(self.unidepth, module).parameters())}]
-
-        # #add a simple transformer decoder
-        # self.transformer_decoder = SimpleTransformer(embed_dim=1024, num_heads=8, num_layers=6)
-        # self.parameters_to_train += [{"params": list(self.transformer_decoder.parameters())}]
-
-
-        self.use_dust3r = cfg.model.backbone.use_dust3r
-        version = cfg.model.backbone.version
-
-        if self.use_dust3r:
-            # hardcoding the model name for now
-            if "dust3r" in version:
-                model_name = "DUSt3R_ViTLarge_BaseDecoder_512_dpt"
-                self.dust3r = AsymmetricCroCo3DStereo.from_pretrained(f"naver/{model_name}")
-                print("DUSt3R loaded!")
-            elif "mast3r" in version:
-                model_name = "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
-                self.dust3r = AsymmetricMASt3R.from_pretrained(f"naver/{model_name}")
-                print("MASt3R loaded!")
-            else:
-                raise ValueError(f"Unknown version of Dust3r: {version}")
-
-            all_dust3r_modules = [
-                "patch_embed",
-                "enc_blocks",
-                "enc_norm",
-                "decoder_embed",
-                "dec_blocks",
-                "dec_blocks2",
-                "dec_norm",
-                "downstream_head1",
-                "downstream_head2"
-            ]
-            modules_to_delete_dust3r = ["downstream_head1", "downstream_head2", "prediction_head", "mask_token"]
-            modules_to_freeze_dust3r = ["patch_embed"]
-
-            # freeze ,delete and add modules
-            if cfg.model.backbone.dust3r.freeze_encoder:
-                modules_to_freeze_dust3r += ["enc_blocks", "enc_norm"]
-            if cfg.model.backbone.dust3r.freeze_decoder:
-                modules_to_freeze_dust3r += ["decoder_embed", "dec_blocks", "dec_blocks2", "dec_norm"]
-            if cfg.model.backbone.dust3r.freeze_head:
-                modules_to_freeze_dust3r += []
-
-            for module in all_dust3r_modules:
-                if module in modules_to_delete_dust3r:
-                    delattr(self.dust3r, module)
-                elif module in modules_to_freeze_dust3r:
-                    freeze_all_params(getattr(self.dust3r, module))
-                else:
-                    self.parameters_to_train += [{"params": list(getattr(self.dust3r, module).parameters())}]
-
-        if not self.use_dust3r:
-            enc_dim = self.unidepth.pixel_encoder.embed_dim        
-        else:
-            enc_dim = self.dust3r.enc_embed_dim
-            self.patch_size = 16 #hard code
-        self.pts_feat_head = nn.Sequential(
-            nn.Linear(enc_dim, self.pts_feat_dim * self.patch_size**2)
-        )        
-        self.parameters_to_train += [{"params": list(self.pts_feat_head.parameters())}]
 
     def get_parameter_groups(self):
         return self.parameters_to_train
@@ -209,7 +155,6 @@ class Rgb_unidepth_Encoder(nn.Module):
         if gt_K is not None and gt_K.ndim == 2:
             gt_K = gt_K.unsqueeze(0)
         B, C, H, W = rgbs.shape
-        true_shape = inputs.get('true_shape', torch.tensor(rgbs.shape[-2:])[None].repeat(B, 1))
 
         self.reshape = False
         if (H != self.unidepth.image_shape[0] or W != self.unidepth.image_shape[1]):
@@ -278,18 +223,10 @@ class Rgb_unidepth_Encoder(nn.Module):
             pts_depth = rearrange(original_pts_depth, 'b c h w -> b (h w) c') #B (H W) C
 
             #from list to single tensor##? last transformer layer output
-            pos = None
-            encoder_outputs = original_encoder_outputs[-1]
-            # encoder_outputs = self.transformer_decoder(encoder_outputs)
+            encoder_outputs = original_encoder_outputs[0] #last layer of transformer     B H/P W/P D
 
-            if not self.use_dust3r:
-                pts_feat = self.pts_feat_head(encoder_outputs)  # (B, H / P,  W / P, EMBED_DIM) ->(B, H / P,  W / P, p^2*D)
-                pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)                
-            else:
-                pts_feat, pos, _ = self.dust3r._encode_image(rgbs, true_shape)
-                if self.use_decoder_3d:
-                    pts_feat = self.pts_feat_head(pts_feat) # (B, N, p^2*D)
-                    pts_feat = rearrange(pts_feat, 'b n (p d) -> b (n p) d', p=self.patch_size**2, d=self.pts_feat_dim)
+            pts_feat = self.pts_feat_head(encoder_outputs)  # (B, H / P,  W / P, EMBED_DIM) ->(B, H / P,  W / P, p^2*D)
+            pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)                
         else:
             # linear layer to decode
             pts_depth = self.pts_head(original_encoder_outputs[-1]) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*1)
@@ -297,15 +234,13 @@ class Rgb_unidepth_Encoder(nn.Module):
             pts_feat = self.pts_feat_head(encoder_outputs) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*D)
             pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)
 
-
         # back project depth to world splace
         scale = self.cfg.model.scales[0]
         pts3d = self.backproject_depth[str(scale)](pts_depth, inv_K)
         pts3d = rearrange(pts3d, 'b c n -> b n c')[:, :, :3]
-        pts3d_hw = rearrange(pts3d, 'b (h w) c -> b c h w', h=H, w=W)
 
         #directly give decoder rgb information for each 3d point
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
         
         
-        return pts3d, pts3d_hw, pts_feat, pos, pts_rgb 
+        return pts3d, original_encoder_outputs, encoder_outputs, pts_feat, pts_rgb

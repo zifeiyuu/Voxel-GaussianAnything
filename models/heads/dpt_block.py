@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from typing import Union, Tuple, Iterable, List, Optional, Dict
-
+from IPython import embed
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
 
@@ -280,7 +280,7 @@ class DPTOutputAdapter(nn.Module):
     def __init__(self,
                  num_channels: int = 1,
                  stride_level: int = 1,
-                 patch_size: Union[int, Tuple[int, int]] = 16,
+                 patch_size: Union[int, Tuple[int, int]] = 14,
                  main_tasks: Iterable[str] = ('rgb',),
                  hooks: List[int] = [2, 5, 8, 11],
                  layer_dims: List[int] = [96, 192, 384, 768],
@@ -347,7 +347,7 @@ class DPTOutputAdapter(nn.Module):
         if self.dim_tokens_enc is not None:
             self.init(dim_tokens_enc=dim_tokens_enc)
 
-    def init(self, dim_tokens_enc=768):
+    def init(self, dim_tokens_enc=1024):
         """
         Initialize parts of decoder that are dependent on dimension of encoder tokens.
         Should be called when setting up MultiMAE.

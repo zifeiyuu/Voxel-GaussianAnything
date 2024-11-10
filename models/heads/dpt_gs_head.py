@@ -16,7 +16,9 @@ import torch.nn as nn
 from .dpt_block import DPTOutputAdapter, Interpolate, make_fusion_block
 from .head_modules import UnetExtractor
 from .postprocess import postprocess
-
+from IPython import embed
+from numpy import inf
+import torch.nn.functional as F
 
 # class DPTOutputAdapter_fix(DPTOutputAdapter):
 #     """
@@ -101,8 +103,9 @@ class DPTOutputAdapter_fix(DPTOutputAdapter):
     remove duplicated weigths, and fix forward for dust3r
     """
 
-    def init(self, dim_tokens_enc=768):
-        super().init(dim_tokens_enc)
+    def init(self, dim_tokens_enc=1024):
+        super().init()
+
         # these are duplicated weights
         del self.act_1_postprocess
         del self.act_2_postprocess
@@ -133,7 +136,7 @@ class DPTOutputAdapter_fix(DPTOutputAdapter):
         layers = [self.adapt_tokens(l) for l in layers]
 
         # Reshape tokens to spatial representation
-        layers = [rearrange(l, 'b (nh nw) c -> b c nh nw', nh=N_H, nw=N_W) for l in layers]
+        layers = [rearrange(l, 'b nh nw c -> b c nh nw') for l in layers]
 
         layers = [self.act_postprocess[idx](l) for idx, l in enumerate(layers)]
         # Project layers to chosen feature dim
@@ -147,6 +150,7 @@ class DPTOutputAdapter_fix(DPTOutputAdapter):
 
         direct_img_feat = self.input_merger(imgs)
         path_1 = self.feat_up(path_1)
+        path_1 = F.interpolate(path_1, size=(H, W), mode='bilinear', align_corners=True) #reshape
         path_1 = path_1 + direct_img_feat
 
         # path_1 = torch.cat([path_1, imgs], dim=1)
@@ -203,4 +207,22 @@ def create_gs_dpt_head(net, has_conf=False, out_nchan=3, postprocess_func=postpr
                                 postprocess=postprocess_func,
                                 depth_mode=net.depth_mode,
                                 conf_mode=net.conf_mode,
+                                head_type='gs_params')
+
+def create_gs_head(feat_len, enc_embed_dim, out_nchan, has_conf=False, postprocess_func=None):
+    """
+    return PixelwiseTaskWithDPT for given net params
+    """
+    l2 = feat_len - 1
+    feature_dim = 256
+    last_dim = feature_dim//2
+    ed = enc_embed_dim
+    return PixelwiseTaskWithDPT(num_channels=out_nchan + has_conf,
+                                feature_dim=feature_dim,
+                                last_dim=last_dim,
+                                hooks_idx=[0, l2*2//4, l2*3//4, l2],
+                                dim_tokens=[ed, ed, ed, ed],
+                                postprocess=postprocess_func,
+                                depth_mode=['exp', -inf, inf],
+                                conf_mode=None,
                                 head_type='gs_params')

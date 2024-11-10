@@ -8,9 +8,5 @@ unidepth:
   freeze_decoder: true
   freeze_head: true
 
-use_dust3r: true
-version: "dust3r" # "dust3r" or "mast3r"
-dust3r:
-  freeze_encoder: false
-  freeze_decoder: false
-  freeze_head: false
+use_conv_head: true
+

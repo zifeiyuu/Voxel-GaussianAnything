@@ -5,6 +5,7 @@ from einops import rearrange
 from collections import OrderedDict
 from ..decoder.gaussian_decoder import GaussianDecoder, get_splits_and_inits
 from ..heads import head_factory
+from .dpt_gs_head import create_gs_head
 from IPython import embed
 
 class LinearHead(nn.Module):
@@ -49,8 +50,8 @@ class LinearHead(nn.Module):
 
         return out
 
-class Vit_Head(nn.Module):
-    def __init__(self, cfg, dust3r_model):
+class ConvHead(nn.Module):
+    def __init__(self, cfg, feat_len, enc_embed_dim):
         super().__init__()
 
         self.cfg = cfg
@@ -59,11 +60,9 @@ class Vit_Head(nn.Module):
         self.split_dimensions, scales, biases = get_splits_and_inits(cfg)
         self.num_output_channels = sum(self.split_dimensions)
 
-        self.dust3r = dust3r_model
-
         self.parameters_to_train = []
 
-        self.gaussian_head = head_factory('dpt_gs', 'gs_params', self.dust3r, has_conf=False, out_nchan=self.num_output_channels)
+        self.gaussian_head = create_gs_head(feat_len, enc_embed_dim, out_nchan=self.num_output_channels)
         self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
 
         # gaussian parameters activation
@@ -73,16 +72,14 @@ class Vit_Head(nn.Module):
     def get_parameter_groups(self):
         return self.parameters_to_train
     
-    def forward(self, encoded_x, pos, pts3d, inputs):
-        dec, _ = self.dust3r._decoder(encoded_x, pos, encoded_x, pos)
+    def forward(self, enc, inputs, pts3d=None):
 
         rgbs = inputs["color_aug", 0, 0]
         B, C, H, W = rgbs.shape
         true_shape = inputs.get('true_shape', torch.tensor(rgbs.shape[-2:])[None].repeat(B, 1))
-        gaussian_params = self.gaussian_head([tok.float() for tok in dec], pts3d, rgbs[:, :3], true_shape[0].cpu().tolist()) #B channel H W
-        
+        raw_gaussian_params = self.gaussian_head([tok.float() for tok in enc], pts3d, rgbs[:, :3], true_shape[0].cpu().tolist()) #B channel H W
         # n is the number of gaussians, d is the dimension of the gaussian parameters
-        gaussian_params = rearrange(gaussian_params, 'b d h w -> b d (h w)')
-        out = self.gaussian_decoder(gaussian_params, self.split_dimensions)
+        raw_gaussian_params = rearrange(raw_gaussian_params, 'b d h w -> b d (h w)')
+        out = self.gaussian_decoder(raw_gaussian_params, self.split_dimensions)
 
         return out
