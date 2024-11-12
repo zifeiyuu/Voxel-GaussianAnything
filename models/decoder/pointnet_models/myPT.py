@@ -221,26 +221,38 @@ class GridPool(nn.Module):
 
 
 class Expand(nn.Module):
-    def __init__(self, in_channels, out_channels, expansion=2):
+    def __init__(self, in_channels, out_channels, expansion=2, norm_layer=nn.LayerNorm, identity=True):
         super().__init__()
         self.expansion = expansion
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.identity = identity
         
-        self.expand_feat = MLP(3 + in_channels, out_channels * expansion)
-        self.expand_offset = MLP(3 + in_channels, 3 * expansion)
+        if not identity:
+            self.expand_feat = MLP(3 + in_channels, out_channels * expansion)
+            self.expand_offset = MLP(3 + in_channels, 3 * expansion)
+        else:
+            self.expand_feat = MLP(3 + in_channels, out_channels * expansion)
+            self.expand_offset = MLP(3 + in_channels, 3 * (expansion - 1))
         
         self.act = nn.ReLU(inplace=True)
+        self.norm = norm_layer(out_channels * expansion)
     
     def forward(self, pxo):
         p, x, o = pxo  # (n, 3), (n, c_in), (b)
         offsets = self.expand_offset(torch.cat([p, x], dim=-1)) # (n, 3*expansion)
-        offsets = einops.rearrange(offsets, "n (r c) -> n r c", r=self.expansion) # (n, expansion, 3)
+        if not self.identity:
+            offsets = einops.rearrange(offsets, "n (r c) -> n r c", r=self.expansion) # (n, expansion, 3)
+        else:
+            offsets = einops.rearrange(offsets, "n (r c) -> n r c", r=self.expansion - 1) # (n, expansion-1, 3)
+            offsets = torch.cat([torch.zeros_like(offsets[:, :1, :]), offsets]) # (n, expansion, 3)
+        
         new_p = p.unsqueeze(1) + offsets # (n, expansion, 3)
         new_p = new_p.reshape(-1, 3) # (n*expansion, 3)
 
         new_feats = self.act(self.expand_feat(torch.cat([p, x], dim=-1))) # (n, c_out*expansion)
         new_feats = einops.rearrange(new_feats, "n (r c) -> (n r) c", r=self.expansion) # (n*expansion, c_out)
+        new_feats = self.norm(new_feats) # (n*expansion, c_out)
 
         new_o = o * self.expansion # (b), each sample's point number is multiplied by expansion
 
@@ -748,7 +760,8 @@ class Decoder(nn.Module):
         self.expand = Expand(
             in_channels=in_channels,
             out_channels=embed_channels,
-            expansion=expansion
+            expansion=expansion,
+            norm_layer=norm_layer,
         )
 
         self.use_cross_attn = use_cross_attn
