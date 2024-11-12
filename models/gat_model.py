@@ -36,7 +36,6 @@ class GATModel(BaseModel):
         super().__init__(cfg)
 
         self.cfg = cfg
-        self.use_conv_head = cfg.model.backbone.use_conv_head
 
         self.parameters_to_train = []
 
@@ -53,10 +52,7 @@ class GATModel(BaseModel):
             self.decoder_3d = PointTransformerDecoder(cfg)
             self.parameters_to_train += self.decoder_3d.get_parameter_groups()
 
-        if self.use_conv_head:
-            self.decoder_gs = ConvHead(cfg, self.encoder.unidepth.pixel_encoder.n_blocks, self.encoder.enc_dim)
-        else:
-            self.decoder_gs = LinearHead(cfg)
+        self.decoder_gs = LinearHead(cfg)
         self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
 
@@ -66,20 +62,13 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d, original_encoder_outputs, encoder_outputs, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3) and (B, N, C)
-
-        B, C, H, W = inputs["color_aug", 0, 0].shape
+        pts3d, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3) and (B, N, C)
 
         if self.use_decoder_3d:
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
             
         # predict gaussian parameters for each point
-        pts_feat = rearrange(pts_feat, "b (h w) d -> b h w d", h=H, w=W)
-        copy_layer = [encoder_outputs] * len(original_encoder_outputs) #try
-        if self.use_conv_head:
-            outputs = self.decoder_gs(copy_layer, inputs)
-        else:
-            outputs = self.decoder_gs(torch.cat([pts_feat, pts3d, pts_rgb], dim=-1))
+        outputs = self.decoder_gs(torch.cat([pts_feat, pts3d, pts_rgb], dim=-1))
 
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)

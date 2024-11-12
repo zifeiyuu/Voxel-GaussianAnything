@@ -12,9 +12,8 @@ from .resnet_encoder import ResnetEncoder
 from ..decoder.resnet_decoder import ResnetDecoder, ResnetDepthDecoder
 from IPython import embed
 from .geometric import generate_rays
-from .helper import SimpleTransformer, freeze_all_params, _paddings, _shapes, _preprocess, _postprocess
+from .helper import freeze_all_params, _paddings, _shapes, _preprocess, _postprocess
 from .layers import BackprojectDepth
-from ..heads import head_factory
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 unidepth_path = os.path.join(base_dir, 'submodules/UniDepth')
@@ -22,16 +21,6 @@ sys.path.insert(0, unidepth_path)
 from hubconf import UniDepth
 from unidepth.utils.constants import (IMAGENET_DATASET_MEAN,
                                       IMAGENET_DATASET_STD)
-sys.path.pop(0)
-
-dust3r_path = os.path.join(base_dir, 'submodules/dust3r')
-sys.path.insert(0, dust3r_path)
-from dust3r.model import AsymmetricCroCo3DStereo
-sys.path.pop(0)
-
-mast3r_path = os.path.join(base_dir, 'submodules/mast3r')
-sys.path.insert(0, mast3r_path)
-from mast3r.model import AsymmetricMASt3R
 sys.path.pop(0)
 
 class Rgb_unidepth_Encoder(nn.Module):
@@ -243,4 +232,4 @@ class Rgb_unidepth_Encoder(nn.Module):
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
         
         
-        return pts3d, original_encoder_outputs, encoder_outputs, pts_feat, pts_rgb
+        return pts3d, pts_feat, pts_rgb

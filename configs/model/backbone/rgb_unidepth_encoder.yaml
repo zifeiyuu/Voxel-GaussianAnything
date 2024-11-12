@@ -8,5 +8,4 @@ unidepth:
   freeze_decoder: true
   freeze_head: true
 
-use_conv_head: true
 
