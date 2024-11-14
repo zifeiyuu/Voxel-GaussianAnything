@@ -21,7 +21,7 @@ class LinearHead(nn.Module):
         self.parameters_to_train = []
 
         # linear decoder
-        self.gaussian_head = nn.Linear(self.in_dim + 3 + 3, self.num_output_channels)
+        self.gaussian_head = nn.Linear(self.in_dim + 3, self.num_output_channels)
         self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
 
         # gaussian parameters initialisation
@@ -47,39 +47,5 @@ class LinearHead(nn.Module):
         # we reshape to make flash3d's gaussian decoder happy
         gaussian_params = rearrange(gaussian_params, 'b n d -> b d n')
         out = self.gaussian_decoder(gaussian_params, self.split_dimensions)
-
-        return out
-
-class ConvHead(nn.Module):
-    def __init__(self, cfg, feat_len, enc_embed_dim):
-        super().__init__()
-
-        self.cfg = cfg
-        self.in_dim = cfg.model.backbone.pts_feat_dim
-
-        self.split_dimensions, scales, biases = get_splits_and_inits(cfg)
-        self.num_output_channels = sum(self.split_dimensions)
-
-        self.parameters_to_train = []
-
-        self.gaussian_head = create_gs_head(feat_len, enc_embed_dim, out_nchan=self.num_output_channels)
-        self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
-
-        # gaussian parameters activation
-        self.gaussian_decoder = GaussianDecoder(cfg)
-        self.parameters_to_train += [{"params": self.gaussian_decoder.parameters()}]
-
-    def get_parameter_groups(self):
-        return self.parameters_to_train
-    
-    def forward(self, enc, inputs, pts3d=None):
-
-        rgbs = inputs["color_aug", 0, 0]
-        B, C, H, W = rgbs.shape
-        true_shape = inputs.get('true_shape', torch.tensor(rgbs.shape[-2:])[None].repeat(B, 1))
-        raw_gaussian_params = self.gaussian_head([tok.float() for tok in enc], pts3d, rgbs[:, :3], true_shape[0].cpu().tolist()) #B channel H W
-        # n is the number of gaussians, d is the dimension of the gaussian parameters
-        raw_gaussian_params = rearrange(raw_gaussian_params, 'b d h w -> b d (h w)')
-        out = self.gaussian_decoder(raw_gaussian_params, self.split_dimensions)
 
         return out

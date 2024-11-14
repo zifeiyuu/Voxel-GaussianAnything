@@ -1,14 +1,14 @@
 defaults:
   - depth: unidepth
   - backbone: rgb_unidepth_encoder
-  - decoder_3d: PT_decoder
+  - decoder_3d: PT_decoder_debug
 
 name: rgb_unidepth
 frame_ids: [0, -1, 1]
 scales: [0]
 gauss_novel_frames: [-1, 1, 2] #
 
-use_decoder_3d: false
+use_decoder_3d: true
 
 min_depth: 0.1
 max_depth: 20

@@ -445,7 +445,7 @@ class pixelsplatDataset(Dataset):
             # Additional metadata
             input_frame_idx = src_and_tgt_frame_idxs[0]  # The source frame
             timestamp = pose_data["timestamps"][input_frame_idx]
-            inputs[("frame_id", 0)] = f"{timestamp}+{self.split}+{seq_key}"
+            inputs[("frame_id", 0)] = f"{seq_key}+{timestamp}+{self.split}"
 
             if inputs_depth is not None:
                 inputs[("unidepth", frame_name, 0)] = inputs_depth

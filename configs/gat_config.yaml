@@ -10,13 +10,13 @@ config:
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 16
+  batch_size: 2
   num_workers: 16
 
 train:
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
-  num_gpus: 7
+  num_gpus: [1, 2, 3, 4, 5, 6] #[1, 2, 3, 4, 5, 6]
   load_weights_folder:
   ema:
     use: true

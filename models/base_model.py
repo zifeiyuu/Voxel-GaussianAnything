@@ -172,18 +172,15 @@ class BaseModel(nn.Module):
                     else:
                         K_tgt = inputs[("K_tgt", frame_id)]
                     focals_pixels = torch.diag(K_tgt[b])[:2]
-                    
-                    # debug = False
-                    # if debug and frame_id == 0:
-                    #     import numpy as np
-                    #     image = inputs[("color", 0, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
-                    #     image = (image * 255).astype(np.uint8)
-                    #     xyz = outputs["pts3d_pred"].squeeze().transpose(0, 1).detach().cpu()
-                    #     debug_vis_pointcloud(xyz, K_tgt[b], H, W, image)
-                    #     debug_vis_pointcloud([], K_tgt[b], H, W, image)
-                    #     image2 = inputs[("color", 3, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
-                    #     image2 = (image2 * 255).astype(np.uint8)
-                    #     debug_vis_pointcloud([], K_tgt[b], H, W, image2)
+
+                    debug = False
+                    if debug and frame_id == 0 and not self.training:
+                        import numpy as np
+                        image = inputs[("color", 0, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
+                        image = (image * 255).astype(np.uint8)
+                        xyz = outputs["gauss_means"].squeeze().transpose(0, 1).detach().cpu()
+                        debug_vis_pointcloud(xyz, K_tgt[b], H, W, inputs[("frame_id", 0)], image)
+                        debug_vis_pointcloud([], K_tgt[b], H, W, inputs[("frame_id", 0)], image)
 
                     fovY = focal2fov(focals_pixels[1].item(), H)
                     fovX = focal2fov(focals_pixels[0].item(), W)
@@ -199,6 +196,7 @@ class BaseModel(nn.Module):
                     # use random background for the better opacity learning
                     if cfg.model.randomise_bg_colour and self.is_train():
                         bg_color = torch.rand(3, dtype=dtype, device=device)
+                        # torch.tensor(cfg.model.bg_colour, dtype=dtype, device=device)
                     else:
                         bg_color = torch.tensor(cfg.model.bg_colour, dtype=dtype, device=device)
 
@@ -215,21 +213,12 @@ class BaseModel(nn.Module):
                         (H, W),
                         bg_color,
                         cfg.model.max_sh_degree
+                        # override_color = torch.tensor([[1., 1., 1.]], device=device)
                     )
                     rgb = out["render"]
                     rgbs.append(rgb)
                     if "depth" in out:
                         depths.append(out["depth"])
-
-                    rgb2 = rgb.clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
-                    input_aug = inputs[("color_aug", 0, 0)][0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
-                    # if frame_id == 0:
-                    #     plt.imsave(f"/mnt/ziyuxiao/code/GaussianAnything/output/render_image/render_image_{str(time.time())}.png", rgb2)  
-                    #     plt.imsave(f"/mnt/ziyuxiao/code/GaussianAnything/output/aug/aug_{str(time.time())}.png", input_aug)  
-                    #     spliced_image = np.concatenate((rgb2, input_aug), axis=1)
-                    #     spliced_image_uint8 = (spliced_image * 255).astype(np.uint8)
-                    #     spliced_image_path = f"/mnt/ziyuxiao/code/GaussianAnything/output/splice/{str(time.time())}.png"
-                    #     plt.imsave(spliced_image_path, spliced_image_uint8)
 
                 rbgs = torch.stack(rgbs, dim=0)
                 outputs[("color_gauss", frame_id, scale)] = rbgs

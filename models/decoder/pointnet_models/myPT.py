@@ -236,7 +236,7 @@ class Expand(nn.Module):
             self.expand_offset = MLP(3 + in_channels, 3 * (expansion - 1))
         
         self.act = nn.ReLU(inplace=True)
-        self.norm = norm_layer(out_channels * expansion)
+        self.norm = norm_layer(out_channels)
     
     def forward(self, pxo):
         p, x, o = pxo  # (n, 3), (n, c_in), (b)
@@ -245,7 +245,8 @@ class Expand(nn.Module):
             offsets = einops.rearrange(offsets, "n (r c) -> n r c", r=self.expansion) # (n, expansion, 3)
         else:
             offsets = einops.rearrange(offsets, "n (r c) -> n r c", r=self.expansion - 1) # (n, expansion-1, 3)
-            offsets = torch.cat([torch.zeros_like(offsets[:, :1, :]), offsets]) # (n, expansion, 3)
+            offsets = torch.cat([torch.zeros_like(offsets[:, :1, :]), offsets], dim=1) # (n, expansion, 3)
+            # offsets = torch.zeros_like(offsets[:, :, :])
         
         new_p = p.unsqueeze(1) + offsets # (n, expansion, 3)
         new_p = new_p.reshape(-1, 3) # (n*expansion, 3)
@@ -969,6 +970,7 @@ class PointTransformerV2_x(nn.Module):
         for i in reversed(range(self.num_stages)):
             skip_points = skips.pop(-1)
             points = self.dec_stages[i](points, skip_points)
-        
+
         points = self.final_expand(points)
+        # points = self.final_expand([coord, points[1], points[2]])
         return points

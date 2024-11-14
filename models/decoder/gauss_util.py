@@ -16,7 +16,7 @@ from einops import einsum
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from IPython import embed
 
-def debug_vis_pointcloud(xyz, K, H, W, image=None):
+def debug_vis_pointcloud(xyz, K, H, W, name, image=None):
     if image is None:
         image = np.zeros((H, W, 3), dtype=np.uint8)
     else:
@@ -34,7 +34,7 @@ def debug_vis_pointcloud(xyz, K, H, W, image=None):
     t = str(time.time())
     t = t.replace(".", "")
     t = t[:14]
-    cv2.imwrite(f"debug_{t}.png", image)
+    cv2.imwrite(f"/mnt/ziyuxiao/code/GaussianAnything/output/debug/{name}_{t}.png", image)
 
 def getProjectionMatrix(znear, zfar, fovX, fovY, pX=0.0, pY=0.0):
     tanHalfFovY = math.tan((fovY / 2))

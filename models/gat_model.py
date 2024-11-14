@@ -11,8 +11,7 @@ from .encoder.dust3r_encoder import Dust3rEncoder
 from .encoder.rgb_unidepth_encoder import Rgb_unidepth_Encoder
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from .base_model import BaseModel
-from .heads.gat_head import LinearHead, ConvHead
-from .heads import head_factory
+from .heads.gat_head import LinearHead
 from misc.util import add_source_frame_id
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
 
@@ -66,14 +65,19 @@ class GATModel(BaseModel):
 
         if self.use_decoder_3d:
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
-            
-        # predict gaussian parameters for each point
-        outputs = self.decoder_gs(torch.cat([pts_feat, pts3d, pts_rgb], dim=-1))
 
+        # predict gaussian parameters for each point
+        outputs = self.decoder_gs(torch.cat([pts_feat, pts3d], dim=-1))
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         # outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
         outputs["gauss_means"] = pts3d_reshape[:, :, :3, :]
+
+        # if self.use_decoder_3d:
+        #     pts3d2, pts_feat2 = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
+        # outputs = self.decoder_gs(torch.cat([torch.cat([pts_feat, pts_feat2], dim=1), torch.cat([pts3d, pts3d2], dim=1)], dim=-1))
+        # pts3d_reshape = rearrange(torch.cat([pts3d, pts3d2], dim=1), "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
+        # outputs["gauss_means"] = pts3d_reshape[:, :, :3, :]
 
         if cfg.model.gaussian_rendering:
             self.process_gt_poses(inputs, outputs)

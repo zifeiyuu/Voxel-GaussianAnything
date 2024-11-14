@@ -31,7 +31,6 @@ class Rgb_unidepth_Encoder(nn.Module):
         self.patch_size = 14  #hard code!! to fit dino v2 l14, don't know how to change patch size inside. default patch size in dust3r encoder is 16 != 14
         self.pts_feat_dim = cfg.model.backbone.pts_feat_dim
         self.use_unidepth_decoder = cfg.model.backbone.use_unidepth_decoder
-        self.use_decoder_3d = cfg.model.use_decoder_3d
 
         self.unidepth = UniDepth(
             version=cfg.model.depth.version, 
