@@ -251,9 +251,9 @@ class Expand(nn.Module):
         new_p = p.unsqueeze(1) + offsets # (n, expansion, 3)
         new_p = new_p.reshape(-1, 3) # (n*expansion, 3)
 
-        new_feats = self.act(self.expand_feat(torch.cat([p, x], dim=-1))) # (n, c_out*expansion)
+        new_feats = self.expand_feat(torch.cat([p, x], dim=-1)) # (n, c_out*expansion)
         new_feats = einops.rearrange(new_feats, "n (r c) -> (n r) c", r=self.expansion) # (n*expansion, c_out)
-        new_feats = self.norm(new_feats) # (n*expansion, c_out)
+        new_feats = self.act(self.norm(new_feats)) # (n*expansion, c_out)
 
         new_o = o * self.expansion # (b), each sample's point number is multiplied by expansion
 
