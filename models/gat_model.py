@@ -48,6 +48,7 @@ class GATModel(BaseModel):
 
         self.use_decoder_3d = cfg.model.use_decoder_3d
         if self.use_decoder_3d:
+            self.normalize_before_decoder_3d = cfg.model.normalize_before_decoder_3d
             self.decoder_3d = PointTransformerDecoder(cfg)
             self.parameters_to_train += self.decoder_3d.get_parameter_groups()
 
@@ -61,10 +62,19 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3) and (B, N, C)
+        pts3d, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
         if self.use_decoder_3d:
+            if self.normalize_before_decoder_3d:
+                # normalize by mean and std of points in each batch
+                mean = pts3d.mean(dim=1, keepdim=True) # (B, 1, 3)
+                std = pts3d.std(dim=1, keepdim=True) # (B, 1, 3)
+                pts3d = (pts3d - mean) / std # (B, N, 3)
+                
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
+            if self.normalize_before_decoder_3d:
+                # denormalize
+                pts3d = pts3d * std + mean # (B, N, 3)
 
         # predict gaussian parameters for each point
         outputs = self.decoder_gs(torch.cat([pts_feat, pts3d, pts_rgb], dim=-1))
