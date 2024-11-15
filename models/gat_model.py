@@ -66,15 +66,15 @@ class GATModel(BaseModel):
 
         if self.use_decoder_3d:
             if self.normalize_before_decoder_3d:
-                # normalize by mean and std of points in each batch
+                # normalize points in each batch
                 mean = pts3d.mean(dim=1, keepdim=True) # (B, 1, 3)
-                std = pts3d.std(dim=1, keepdim=True) # (B, 1, 3)
-                pts3d = (pts3d - mean) / std # (B, N, 3)
+                z_median = torch.median(pts3d[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
+                pts3d = (pts3d - mean) / (z_median + 1e-6) # (B, N, 3)
                 
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
             if self.normalize_before_decoder_3d:
                 # denormalize
-                pts3d = pts3d * std + mean # (B, N, 3)
+                pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
 
         # predict gaussian parameters for each point
         outputs = self.decoder_gs(torch.cat([pts3d, pts_feat], dim=-1))
