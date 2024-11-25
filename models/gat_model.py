@@ -80,7 +80,8 @@ class GATModel(BaseModel):
         outputs = self.decoder_gs(torch.cat([pts3d, pts_feat], dim=-1))
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
-        outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
+        outputs["gauss_means"] = pts3d_reshape
+        # outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
         outputs["gauss_means"] = outputs["gauss_means"][:, :, :3, :]
 
         # if self.use_decoder_3d:

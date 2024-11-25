@@ -83,14 +83,14 @@ def run_epoch(fabric,
             if step % cfg.run.save_frequency == 0 and step != 0:
                 trainer.model.save_model(optimiser, step, ema)
             # save the validation results
-            early_phase = (step < 16000) and (step % 500 == 0) #500
+            early_phase = (step < 20000) and (step % 2000 == 0) #500
             if early_phase or step % cfg.run.val_frequency == 0:
                 with torch.no_grad():
                     model_eval = ema if ema is not None else trainer.model
                     trainer.validate(model_eval, evaluator, val_loader, device=fabric.device)
 
         # Clean up and free GPU memory
-        if early_phase or step % cfg.run.val_frequency == 0 or step % 500 == 0: #################@@@@@@@@@@@@@@@@
+        if early_phase or step % cfg.run.val_frequency == 0 or step % 50 == 0: #################@@@@@@@@@@@@@@@@
             torch.cuda.empty_cache()
 
         # # Clear up loss and outputs to free memory
@@ -133,16 +133,42 @@ def main(cfg: DictConfig):
     model = trainer.model
 
     # set up optimiser
+    # optimiser = optim.AdamW(model.parameters_to_train, lr=cfg.optimiser.learning_rate, weight_decay=cfg.optimiser.weight_decay) 
     optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
-    def lr_lambda(*args):
-        threshold = cfg.optimiser.scheduler_lambda_step_size
-        if trainer.step < threshold:
-            return 1.0
-        else:
-            return 0.1
-    lr_scheduler = optim.lr_scheduler.LambdaLR(
-        optimiser, lr_lambda
-    )
+    num_warmup_steps = cfg.optimiser.num_warmup_steps
+    max_training_steps = cfg.optimiser.max_training_steps
+    min_lr_ratio = cfg.optimiser.min_lr_ratio
+
+    if cfg.optimiser.mode == 'cosine':
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimiser,
+            T_max=max_training_steps,  # sets the period of the cosine cycle
+            eta_min= min_lr_ratio * cfg.optimiser.learning_rate  # sets the minimum learning rate
+        )
+    elif cfg.optimiser.mode == 'linear':
+        def lr_linear(num_warmup_steps, num_training_steps, min_lr_ratio=0):
+            def lr_lambda(current_step):
+                if current_step < num_warmup_steps:
+                    return cfg.optimiser.warmup_ratio
+                # Linear decrease from 1 to min_lr_ratio
+                return max(min_lr_ratio, (num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps)))
+            
+            return lr_lambda
+        
+        lr_scheduler = optim.lr_scheduler.LambdaLR(
+            optimiser, 
+            lr_linear(num_warmup_steps, max_training_steps, min_lr_ratio)
+        )
+    else:
+        def lr_lambda(*args):
+            threshold = cfg.optimiser.scheduler_lambda_step_size
+            if trainer.step < threshold:
+                return 1.0
+            else:
+                return 0.1
+        lr_scheduler = optim.lr_scheduler.LambdaLR(
+            optimiser, lr_lambda
+        )
 
     if cfg.train.ema.use and fabric.is_global_zero: #Exponential Moving Average (EMA)
         ema = EMA(  

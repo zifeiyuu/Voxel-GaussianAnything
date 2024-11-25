@@ -1,0 +1,3 @@
+[submodule "submodules/SplatFormer"]
+	path = submodules/SplatFormer
+	url = https://github.com/ChenYutongTHU/SplatFormer.git

@@ -21,7 +21,7 @@ from misc.util import add_source_frame_id
 from misc.visualise_3d import save_ply
 
 from datasets.util import create_datasets
-
+from IPython import embed
 
 def get_model_instance(model):
     """
@@ -116,9 +116,18 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     out_dir.mkdir(exist_ok=True)
     spliced_images_list = []
     for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)], desc="Evaluating"):
+        try:
+            inputs = next(dataloader_iter)
+        ## not used ##
+        except Exception as e:
+            if cfg.dataset.name == "re10k" or cfg.dataset.name == "pixelsplat":
+                if cfg.dataset.test_split in ["pixelsplat_ctx1", "pixelsplat_ctx2", "latentsplat_ctx1", "latentsplat_ctx2"]:
+                    print(f"Failed to read example {k}")
+                    continue
+            raise e
+        
         if save_vis:
-            print(f"saving images to: {out_dir}")
-            seq_name = dataloader.dataset._seq_keys[k]
+            seq_name = inputs[("frame_id", 0)][0]
             out_out_dir = out_dir / seq_name
             out_out_dir.mkdir(exist_ok=True)
             out_pred_dir = out_out_dir / "pred"
@@ -130,16 +139,6 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
             out_spliced_dir = out_out_dir / "spliced"
             out_spliced_dir.mkdir(exist_ok=True)
 
-        try:
-            inputs = next(dataloader_iter)
-        ## not used ##
-        except Exception as e:
-            if cfg.dataset.name == "re10k" or cfg.dataset.name == "pixelsplat":
-                if cfg.dataset.test_split in ["pixelsplat_ctx1", "pixelsplat_ctx2", "latentsplat_ctx1", "latentsplat_ctx2"]:
-                    print(f"Failed to read example {k}")
-                    continue
-            raise e
-        
         with torch.no_grad():
             if device is not None:
                 to_device(inputs, device)
@@ -222,7 +221,7 @@ def main(cfg: DictConfig):
     cfg.data_loader.num_workers = 16
     if cfg.model.name == "unidepth":
         model = GaussianPredictor(cfg)
-    elif cfg.model.name == "gat":
+    elif cfg.model.name == "rgb_unidepth":
         from models.gat_model import GATModel
         model = GATModel(cfg)
     else:

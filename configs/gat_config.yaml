@@ -2,8 +2,8 @@ defaults:
   - _self_
   - hydra: defaults
   - model: rgb_unidepth_model #gat_model rgb_unidepth_model
-  - dataset: pixelsplat
-  - loss: [reconstruction, regularization]  ## originally only [reconstruction] loss
+  - dataset: pixelsplat # pixelsplat scannetpp
+  - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
   exp_name: "debug"
@@ -16,7 +16,7 @@ data_loader:
 train:
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
-  num_gpus: 1 #[1, 2, 3, 4, 5, 6]
+  num_gpus: [1, 2, 3, 4, 5, 6] #[1, 2, 3, 4, 5, 6]
   load_weights_folder: false
   ema:
     use: true
@@ -25,9 +25,16 @@ train:
     beta: 0.9999
 
 optimiser:
-  learning_rate: 1e-4
+  learning_rate: 1e-4 #1e-4
   num_epochs: 1
   scheduler_lambda_step_size: 500000
+  weight_decay: 1e-4 # 1e-2 1e-4
+
+  mode: linear
+  num_warmup_steps: 0
+  warmup_ratio: 2.0
+  max_training_steps: 10000
+  min_lr_ratio: 0.3
 
 run:
   resume_ckpt: null

@@ -24,9 +24,6 @@ class Trainer(nn.Module):
         self.step = 0
         if cfg.model.name == "unidepth":
             self.model = GaussianPredictor(cfg)
-        elif cfg.model.name == "gat":
-            from models.gat_model import GATModel
-            self.model = GATModel(cfg)
         elif cfg.model.name == "rgb_unidepth":
             from models.gat_model import GATModel
             self.model = GATModel(cfg)
@@ -92,6 +89,8 @@ class Trainer(nn.Module):
         total_loss = 0.0
 
         if cfg.model.gaussian_rendering:
+            # losses["loss/big_gauss_reg_loss"] = 0
+            # losses["loss/gauss_offset_reg"] = 0
             # regularize too big or too small gaussians
             if (big_g_lmbd := cfg.loss.gauss_scale.weight) > 0:
                 scaling = outputs["gauss_scaling"]

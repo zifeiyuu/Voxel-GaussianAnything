@@ -1,0 +1,18 @@
+name: v3_debug
+
+in_channels: 35
+enable_flash: True
+output_dim: 64
+enc_dim: 64
+turn_off_bn: True
+stride: [1,2]
+embedding_type: 'PT_embedding'
+enc_depths: [2, 6, 2]
+enc_num_head: [2, 4, 8]
+dec_depths: [2, 2]
+dec_num_head: [4, 8]
+dec_channels: [64, 128]
+enc_channels: [64, 128, 256]
+pdnorm_bn: False
+pdnorm_ln: False
+pretrained_ckpt: 

@@ -3,6 +3,7 @@ from PIL import Image
 import numpy as np
 import io
 import torchvision.transforms as T
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 from pathlib import Path
 import random
@@ -11,17 +12,27 @@ import os
 import logging
 import json
 import cv2
+import pickle
+import gzip
+from tqdm import tqdm
+from matplotlib import pyplot as plt
 
 from datasets.scannetpp.masks import calculate_in_frustum_mask_single
 from datasets.data import process_projs, data_to_c2w, pil_loader, get_sparse_depth
+from datasets.tardataset import TarDataset
+from misc.localstorage import copy_to_local_storage, extract_tar, get_local_dir
 
+from IPython import embed
 logger = logging.getLogger(__name__)
 
 class scannetppDataset(Dataset):
     def __init__(self, cfg, split):
         self.cfg = cfg
 
+        self.split = split
         self.dataset_folder = Path(self.cfg.dataset.data_path)
+        self.is_train = self.split == "train"
+        self.mode = cfg.dataset.mode
         # if this is a relative path to the code dir, make it absolute
         if not self.dataset_folder.is_absolute(): 
             code_dir = Path(__file__).parents[1]
@@ -31,9 +42,9 @@ class scannetppDataset(Dataset):
                 raise FileNotFoundError(f"Relative path {relative_path} does not exist")
         elif not self.dataset_folder.exists():
             raise fileNotFoundError(f"Absolute path {self.dataset_folder} does not exist")
+        
         self.dataset_folder = self.dataset_folder.resolve()
 
-        self.split = split
         self.image_size = (self.cfg.dataset.height, self.cfg.dataset.width)
         self.color_aug = self.cfg.dataset.color_aug
         # Padding function if border augmentation is required
@@ -46,10 +57,16 @@ class scannetppDataset(Dataset):
         self.interp = Image.LANCZOS
         # self.loader = pil_loader
         self.to_tensor = T.ToTensor()
+        # self.loader = pil_loader
+        if cfg.dataset.normalize:
+            self.to_tensor = T.Compose([
+                T.ToTensor(),
+                T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+            ])
+        else:
+            self.to_tensor = T.ToTensor()
 
-        self.is_train = self.split == "train"
-
-        specific_files = self.cfg.dataset.get('specific_files', []) 
+        self.specific_files = self.cfg.dataset.get('specific_files', []) 
 
         try:
             # Newer version with tuple ranges
@@ -80,99 +97,32 @@ class scannetppDataset(Dataset):
             self._left_offset = 0
             fixed_dilation = 0
 
-        self.png_depth_scale = cfg.dataset.png_depth_scale 
+        # self.png_depth_scale = cfg.dataset.png_depth_scale  #######
 
-        # Dictionaries to store the data for each scene
-        self.color_paths = {}
-        self.depth_paths = {}
-        self.intrinsics = {}
-        self.c2ws = {}
+        self._pose_data = self._load_pose_data()
 
         # Fetch the seq_keys to use
-        if specific_files:
-            self._seq_keys = specific_files
+        if self.specific_files:
+            self._seq_keys = self.specific_files
         else:
+            self._seq_keys = []
             if self.split == "train":
-                sequence_file = os.path.join(self.dataset_folder, "raw", "splits", "nvs_sem_train.txt")
-                bad_scenes = ['303745abc7']
+                bad_scenes = [] #['303745abc7']
+                train_list = cfg.dataset.train_split_path
+                for train_list_file in train_list:
+                    with open(os.path.join(self.dataset_folder, "splits", train_list_file), "r") as f:
+                        # Read lines and extend them to the sequence keys
+                        self._seq_keys.extend([line.strip() for line in f if line.strip() not in bad_scenes])
             elif self.split == "val" or self.split == "test":
-                sequence_file = os.path.join(self.dataset_folder, "raw", "splits", "nvs_sem_val.txt")
-                bad_scenes = ['cc5237fd77']
-            with open(sequence_file, "r") as f:
-                self._seq_keys = f.read().splitlines()
+                bad_scenes = [] #['cc5237fd77']
+                test_list = cfg.dataset.test_split_path
+                for test_list_file in test_list:
+                    with open(os.path.join(self.dataset_folder, "splits", test_list_file), "r") as f:
+                        # Read lines and extend them to the sequence keys
+                        self._seq_keys.extend([line.strip() for line in f if line.strip() not in bad_scenes])
+
             logger.info(f"Removing scenes that have frames with no valid depths: {bad_scenes}")
             self._seq_keys = [s for s in self._seq_keys if s not in bad_scenes]
-
-        # Collect information for every sequence
-        scenes_with_no_good_frames = []
-        for key in self._seq_keys:
-            input_raw_folder = os.path.join(self.dataset_folder, 'raw', 'data', key)
-            input_processed_folder = os.path.join(self.dataset_folder, 'processed', 'data', key)
-
-            # Load Train & Test Splits
-            frame_file = os.path.join(input_raw_folder, "dslr", "train_test_lists.json")
-            with open(frame_file, "r") as f:
-                train_test_list = json.load(f)
-
-            # Camera Metadata
-            cams_metadata_path = f"{input_processed_folder}/dslr/nerfstudio/transforms_undistorted.json"
-            with open(cams_metadata_path, "r") as f:
-                cams_metadata = json.load(f)
-
-            # Load the nerfstudio/transforms.json file to check whether each image is blurry
-            nerfstudio_transforms_path = f"{input_raw_folder}/dslr/nerfstudio/transforms.json"
-            with open(nerfstudio_transforms_path, "r") as f:
-                nerfstudio_transforms = json.load(f)
-
-            # Create a reverse mapping from image name to the frame information and nerfstudio transform
-            # (as transforms_undistorted.json does not store the frames in the same order as train_test_lists.json)
-            file_path_to_frame_metadata = {}
-            file_path_to_nerfstudio_transform = {}
-            for frame in cams_metadata["frames"]:
-                file_path_to_frame_metadata[frame["file_path"]] = frame
-            for frame in nerfstudio_transforms["frames"]:
-                file_path_to_nerfstudio_transform[frame["file_path"]] = frame
-
-            # Fetch the pose for every frame
-            sequence_color_paths = []
-            sequence_depth_paths = []
-            sequence_c2ws = []
-            for train_file_name in train_test_list["train"]:
-                is_bad = file_path_to_nerfstudio_transform[train_file_name]["is_bad"]
-                if is_bad:
-                    continue
-                sequence_color_paths.append(f"{input_processed_folder}/dslr/undistorted_images/{train_file_name}")
-                sequence_depth_paths.append(f"{input_processed_folder}/dslr/undistorted_depths/{train_file_name.replace('.JPG', '.png')}")
-                frame_metadata = file_path_to_frame_metadata[train_file_name]
-                c2w = np.array(frame_metadata["transform_matrix"], dtype=np.float32)
-                P = np.array([
-                    [1, 0, 0, 0],
-                    [0, -1, 0, 0],
-                    [0, 0, -1, 0],
-                    [0, 0, 0, 1]]
-                ).astype(np.float32)
-                c2w = P @ c2w @ P.T
-                sequence_c2ws.append(c2w)
-
-            if len(sequence_color_paths) == 0:
-                logger.info(f"No good frames for sequence: {key}")
-                scenes_with_no_good_frames.append(key)
-                continue
-
-            # Get the intrinsics data for the frame
-            K = np.eye(3, dtype=np.float32)
-            K[0, 0] = cams_metadata["fl_x"]
-            K[1, 1] = cams_metadata["fl_y"]
-            K[0, 2] = cams_metadata["cx"]
-            K[1, 2] = cams_metadata["cy"]
-
-            self.color_paths[key] = sequence_color_paths
-            self.depth_paths[key] = sequence_depth_paths
-            self.c2ws[key] = sequence_c2ws
-            self.intrinsics[key] = K
-
-        # Remove scenes with no good frames
-        self._seq_keys = [s for s in self._seq_keys if s not in scenes_with_no_good_frames]
 
         if self.is_train:
             self._seq_key_src_idx_pairs = self._full_index(
@@ -185,108 +135,97 @@ class scannetppDataset(Dataset):
             #generate indices based on the strategy
             if self.cfg.video_mode:
                 self._seq_key_src_idx_pairs = self._generate_video_indices()
-            elif self.cfg.dataset.random_selection:
-                self._seq_key_src_idx_pairs = self._generate_random_indices()
+            elif not self.cfg.dataset.random_selection:
+                self._seq_key_src_idx_pairs = self._generate_defined_indices()
             else:
-                self._seq_key_src_idx_pairs = self._generate_defined_indices(-30, 30)
-   
+                self._seq_key_src_idx_pairs = self._generate_random_indices()
+
+    def __len__(self):
+        # Return the total number of frame sets in the dataset
+        return len(self._seq_key_src_idx_pairs)
+    
+    def _load_pose_data(self):
+        print(f"{self.split} Dataset loading data...")
+        file_path = self.dataset_folder  / self.mode / "all_data.pickle.gz"
+        with gzip.open(file_path, "rb") as f:
+            pose_data = pickle.load(f)
+        return pose_data['train']
+    
     def _full_index(self, left_offset, extra_frames):
-        # skip_bad = self.cfg['skip_bad_shape']
-        # if skip_bad:
-            # fn = self.data_path / "valid_seq_ids.train.pickle.gz"
-            # valid_seq_ids = pickle.load(gzip.open(fn, "rb"))
         key_id_pairs = []
         for key in self._seq_keys:
-            seq_len = len(self.color_paths[key])
-            frame_ids = [i + left_offset for i in range(seq_len - extra_frames)]
-            # if skip_bad:
-            #     good_frames = valid_seq_ids[seq_key]
-            #     frame_ids = [f_id for f_id in frame_ids if f_id in good_frames]
-            seq_key_id_pairs = [(key, f_id) for f_id in frame_ids]
-            key_id_pairs += seq_key_id_pairs
+            for period_index, period in enumerate(self._pose_data[key]):
+                seq_len = len(period["poses"])
+                frame_ids = [i + left_offset for i in range(seq_len - extra_frames)]
+                seq_key_id_pairs = [(key, period_index, f_id) for f_id in frame_ids]
+                key_id_pairs += seq_key_id_pairs
         return key_id_pairs
 
     def _generate_random_indices(self):
         """Generate random frame indices for testing."""
         key_id_pairs = []
         for key in self._seq_keys:
-            seq_len = len(self.color_paths[key])
-            if seq_len < 4:
-                continue  # Skip if there are not enough frames
-            # Randomly select four frame indices
-            frame_indices = random.sample(range(seq_len), 4)
-            frame_indices.sort()  # Sort indices to maintain a consistent order
-            key_id_pairs.append((key, frame_indices))
+            for period_index, period in enumerate(self._pose_data[key]):
+                seq_len = len(period["poses"])
+                if seq_len < 4:
+                    continue  # Skip if there are not enough frames
+                # Randomly select four frame indices
+                frame_indices = random.sample(range(seq_len), 4)
+                frame_indices.sort()  # Sort indices to maintain a consistent order
+                key_id_pairs.append((key, period_index, frame_indices))
         return key_id_pairs
 
-    def _generate_defined_indices(self, gap1=5, gap2=10):
-        """Generate default frame indices: (random, random+gap1, random+gap2, random)."""
+    def _generate_defined_indices(self, gap1=-1, gap2=0, gap3=1):
+        """Generate default frame indices for varied gaps, including zero or negative."""
         key_id_pairs = []
         
         for key in self._seq_keys:
-            seq_len = len(self.color_paths[key])
+            for period_index, period in enumerate(self._pose_data[key]):
+                seq_len = len(period["poses"])
 
-            # Ensure gaps are not zero
-            if gap1 == 0 or gap2 == 0 or gap1 >= gap2:
-                print("Gaps cannot be zero.")
-                continue
-            
-            if gap1 * gap2 > 0:
-                # Both gaps are positive
-                if max(abs(gap1), abs(gap2)) >= seq_len:
-                    print("No enough frames.")
+                # Calculate the minimum and maximum index for the source frame to allow all gaps
+                min_gap = min(gap1, gap2, gap3)
+                max_gap = max(gap1, gap2, gap3)
+
+                if seq_len <= max(abs(min_gap), abs(max_gap)):
+                    print("No enough frames to accommodate the largest gap magnitude.")
                     continue
-                if gap1 > 0 and gap2 > 0:
-                    src_idx = random.randint(0, seq_len - 1 - max(gap1, gap2))
+
+                min_index = max(0, -min_gap)  # Ensure the smallest negative gap doesn't go below 0
+                max_index = seq_len - 1 - max_gap  # Ensure the largest positive gap doesn't exceed seq_len-1
                 
-                # Both gaps are negative
-                elif gap1 < 0 and gap2 < 0:
-                    src_idx = random.randint(-min(gap1, gap2), seq_len - 1)
-
-            else:
-                if gap2 - gap1 >= seq_len:
-                    print("No enough frames.")
+                if min_index > max_index:
+                    print("Adjusted index range invalid, skipping.")
                     continue
-                src_idx = random.randint(-gap1, seq_len - 1 - gap2)
+
+                # src_idx = random.randint(min_index, max_index)
+                src_idx = (min_index + max_index) // 2
+                
+                # Calculate indices for target frames
+                tgt_1_idx = src_idx + gap1
+                tgt_2_idx = src_idx + gap2
+                tgt_3_idx = src_idx + gap3
+
+                key_id_pairs.append((key, period_index, [src_idx, tgt_1_idx, tgt_2_idx, tgt_3_idx]))
             
-            # Determine the next two frames at +gap1 and +gap2 offsets
-            tgt_1_idx = src_idx + gap1
-            tgt_2_idx = src_idx + gap2
-
-            # Ensure the indices are within valid bounds
-            tgt_1_idx = max(0, min(tgt_1_idx, seq_len - 1))
-            tgt_2_idx = max(0, min(tgt_2_idx, seq_len - 1)) 
-
-            # Randomly select a target frame different from the others
-            tgt_random_idx = random.choice(
-                [i for i in range(seq_len) if i not in {src_idx, tgt_1_idx, tgt_2_idx}]
-            )
-
-            key_id_pairs.append((key, [src_idx, tgt_1_idx, tgt_2_idx, tgt_random_idx]))
-        
         return key_id_pairs
 
     def _generate_video_indices(self):
         """Generate indices such that the middle frame is the source, and all other frames are targets."""
         key_id_pairs = []
         for key in self._seq_keys:
-            seq_len = len(self.color_paths[key])
-            if seq_len < 2:
-                continue  # Skip if there are not enough frames
+            for period_index, period in enumerate(self._pose_data[key]):
+                seq_len = len(period["poses"])
+                if seq_len < 2:
+                    continue  # Skip if there are not enough frames
 
-            # Set the middle frame as the source frame
-            src_idx = seq_len // 2
+                # Set the middle frame as the source frame
+                src_idx = seq_len // 2
+                # All other frames are target frames
+                tgt_indices = [i for i in range(seq_len) if i != src_idx]
 
-            # All other frames are target frames
-            tgt_indices = [i for i in range(seq_len) if i != src_idx]
-            
-            key_id_pairs.append((key, [src_idx] + tgt_indices))
+                key_id_pairs.append((key, period_index, [src_idx] + tgt_indices))
         return key_id_pairs
-    
-
-    def __len__(self):
-        # Return the total number of frame sets in the dataset
-        return len(self._seq_key_src_idx_pairs)
 
     def process_image(self, img_path):
         # Set up color augmentation function
@@ -302,7 +241,7 @@ class scannetppDataset(Dataset):
             self.color_aug_fn = (lambda x: x)
 
         options=cv2.IMREAD_COLOR
-        if img_path.endswith(('.exr', 'EXR')):
+        if str(img_path).endswith(('.exr', 'EXR')):
             options = cv2.IMREAD_ANYDEPTH
         img = cv2.imread(img_path, options)
         if img is None:
@@ -326,11 +265,12 @@ class scannetppDataset(Dataset):
     
     def process_depth(self, depth_path):
         options=cv2.IMREAD_UNCHANGED
-        if depth_path.endswith(('.exr', 'EXR')):
+        if str(depth_path).endswith(('.exr', 'EXR')):
             options = cv2.IMREAD_ANYDEPTH
         depthmap = cv2.imread(depth_path, options)
         if depthmap is None:
-            raise IOError(f'Could not load image={depth_path} with {options=}')
+            return None
+            # raise IOError(f'Could not load image={depth_path} with {options=}')
         if depthmap.ndim == 3:
             depthmap = cv2.cvtColor(depthmap, cv2.COLOR_BGR2RGB)
         depthmap = depthmap.astype(np.float32)
@@ -347,15 +287,16 @@ class scannetppDataset(Dataset):
     def process_intrinsics(self, K):
         # Scale the intrinsic matrix for the target image size
         K_scale_target = K.copy()
-        K_scale_target[0, :] *= self.image_size[1]
-        K_scale_target[1, :] *= self.image_size[0]
+        K_scale_target[0, :] *= self.image_size[1] / self.cfg.dataset.original_width
+        K_scale_target[1, :] *= self.image_size[0] / self.cfg.dataset.original_height
 
         # Scale the intrinsic matrix for the source image size (considering padding)
         K_scale_source = K.copy()
-        K_scale_source[0, 0] *= self.image_size[1]
-        K_scale_source[1, 1] *= self.image_size[0]
-        K_scale_source[0, 2] *= (self.image_size[1] + self.cfg.dataset.pad_border_aug * 2)
-        K_scale_source[1, 2] *= (self.image_size[0] + self.cfg.dataset.pad_border_aug * 2)
+        K_scale_source[0, 0] *= self.image_size[1] / self.cfg.dataset.original_width
+        K_scale_source[1, 1] *= self.image_size[0] / self.cfg.dataset.original_height
+        K_scale_source[0, 2] *= (self.image_size[1] + self.cfg.dataset.pad_border_aug * 2) / self.cfg.dataset.original_width
+        K_scale_source[1, 2] *= (self.image_size[0] + self.cfg.dataset.pad_border_aug * 2) / self.cfg.dataset.original_height
+        
 
         # Compute the inverse of the scaled source intrinsic matrix
         inv_K_source = np.linalg.pinv(K_scale_source)
@@ -370,8 +311,9 @@ class scannetppDataset(Dataset):
     def __getitem__(self, index):
         # Get the sequence key and frame indices
         if self.is_train:
-            seq_key, src_idx = self._seq_key_src_idx_pairs[index]
+            seq_key, period_idx, src_idx = self._seq_key_src_idx_pairs[index]
             seq_len = len(self.color_paths[seq_key])
+            pose_data = self._pose_data[seq_key][period_idx]
 
             if self.cfg.dataset.frame_sampling_method == "two_forward_one_back":
                 if self.dilation == "random":
@@ -386,7 +328,8 @@ class scannetppDataset(Dataset):
                 target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
                 src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]                
         else:
-            seq_key, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
+            seq_key, period_idx, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
+            pose_data = self._pose_data[seq_key][period_idx]
 
         total_frame_num = len(src_and_tgt_frame_idxs)
         frame_names = list(range(total_frame_num))
@@ -396,23 +339,24 @@ class scannetppDataset(Dataset):
         # Iterate over the frames and process each frame
         for frame_name, frame_idx in zip(frame_names, src_and_tgt_frame_idxs):
             # Process the intrinsic and pose for the current frame
-            c2w = self.c2ws[seq_key][frame_idx]
+            c2w = pose_data['poses'][frame_idx]
             inputs_T_c2w = self.process_pose(c2w)
 
-            intrinsic = self.intrinsics[seq_key]
+            intrinsic = pose_data['intrinsics'][frame_idx]
             inputs_K_tgt, inputs_K_src, inputs_inv_K_src = self.process_intrinsics(intrinsic)
             
             # Process the image for the current frame
-            img_path = self.color_paths[seq_key][frame_idx]
+            img_name = pose_data['images'][frame_idx][:-4] + '.jpg'
+            img_path =  self.dataset_folder / self.mode / seq_key / 'images' / img_name
             inputs_color, inputs_color_aug = self.process_image(img_path)
 
-            depth_path = self.depth_paths[seq_key][frame_idx]
+            depth_name = pose_data['images'][frame_idx][:-4] + '.png'
+            depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
             inputs_depth = self.process_depth(depth_path)
 
             # Additional metadata
-            input_frame_idx = src_and_tgt_frame_idxs[0]  # The source frame
-            input_img_name = self.color_paths[seq_key][input_frame_idx]
-            inputs[("frame_id", 0)] = f"{self.split}+{seq_key}+{input_img_name}"
+            first_img_name = pose_data['images'][0][:-4]  # The source frame
+            inputs[("frame_id", 0)] = f"{seq_key}+{first_img_name}+{self.split}"
             
             # Prepare the inputs dictionary
             inputs[("K_tgt", frame_name)] = inputs_K_tgt
@@ -423,8 +367,9 @@ class scannetppDataset(Dataset):
             inputs[("depth", frame_name, 0)] = inputs_depth
             inputs[("T_c2w", frame_name)] = inputs_T_c2w
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
-
-        inputs[("total_frame_num", 0)] = total_frame_num
+        
+        if not self.is_train:
+            inputs[("total_frame_num", 0)] = total_frame_num
 
         return inputs
 

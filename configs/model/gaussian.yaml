@@ -11,7 +11,7 @@ min_depth: 0.1
 max_depth: 100
 
 # gaussian parameters
-gaussians_per_pixel: 3
+gaussians_per_pixel: 2
 gaussian_rendering: true
 randomise_bg_colour: true
 max_sh_degree: 1

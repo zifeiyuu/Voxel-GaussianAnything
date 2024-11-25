@@ -2,7 +2,7 @@ defaults:
   - _self_
   - hydra: defaults
   - model: gaussian
-  - dataset: pixelsplat
+  - dataset: scannetpp # pixelsplat scannetpp
   - loss: [reconstruction, regularization]  ## originally only [reconstruction] loss
 
 config:
@@ -10,7 +10,7 @@ config:
   file: "config.yaml"
 
 data_loader:
-  batch_size: 12
+  batch_size: 1
   num_workers: 16
 
 train:
@@ -44,7 +44,7 @@ run:
 #evaluation results save config
 save_vis: true
 video_mode: false
-original_video: true
+original_video: false
 scene_ids: []
 output_path: ./output
 

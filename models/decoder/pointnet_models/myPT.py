@@ -137,7 +137,7 @@ class MLP(nn.Module):
 
 
 class TransitionDownFPS(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1, nsample=16, norm_layer=nn.LayerNorm):
+    def __init__(self, in_channels, out_channels, stride=1, nsample=16, norm_layer=nn.Identity): #nn.Identity nn.LayerNorm
         super().__init__()
         self.stride, self.nsample = stride, nsample
         if stride != 1:
@@ -221,7 +221,7 @@ class GridPool(nn.Module):
 
 
 class Expand(nn.Module):
-    def __init__(self, in_channels, out_channels, expansion=2, norm_layer=nn.LayerNorm, identity=True):
+    def __init__(self, in_channels, out_channels, expansion=2, norm_layer=nn.Identity, identity=True): #nn.Identity nn.LayerNorm
         super().__init__()
         self.expansion = expansion
         self.in_channels = in_channels
@@ -972,5 +972,4 @@ class PointTransformerV2_x(nn.Module):
             points = self.dec_stages[i](points, skip_points)
 
         points = self.final_expand(points)
-        # points = self.final_expand([coord, points[1], points[2]])
         return points
