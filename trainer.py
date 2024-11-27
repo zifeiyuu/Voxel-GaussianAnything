@@ -274,7 +274,7 @@ class Trainer(nn.Module):
         """
         if not output_path:
             output_path = self.output_path
-        breakpoint()
+
         score_dict_by_name = evaluate(model, self.cfg, evaluator, val_loader, device, self.cfg.save_vis, output_path)
         split = "val"
         # out = {}
