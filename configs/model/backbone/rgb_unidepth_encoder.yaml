@@ -2,7 +2,7 @@ name: unidepth
 
 pts_feat_dim: 32
 
-version: v3
+version: v2
 
 use_unidepth_decoder: true
 unidepth:

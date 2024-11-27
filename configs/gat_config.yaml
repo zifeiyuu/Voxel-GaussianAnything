@@ -10,7 +10,7 @@ config:
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 1
+  batch_size: 2
   num_workers: 16
 
 train:
@@ -31,9 +31,9 @@ optimiser:
   weight_decay: 1e-4 # 1e-2 1e-4
 
   mode: linear
-  num_warmup_steps: 0
+  num_warmup_steps: 8000
   warmup_ratio: 2.0
-  max_training_steps: 10000
+  max_training_steps: 30000
   min_lr_ratio: 0.3
 
 run:

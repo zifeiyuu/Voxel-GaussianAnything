@@ -124,6 +124,11 @@ class scannetppDataset(Dataset):
             logger.info(f"Removing scenes that have frames with no valid depths: {bad_scenes}")
             self._seq_keys = [s for s in self._seq_keys if s not in bad_scenes]
 
+        self._missing_scans = []
+        with open(os.path.join(self.dataset_folder, "missing_scans.txt"), "r") as f:
+            # Read lines and extend them to the sequence keys
+            self._missing_scans.extend([line.strip() for line in f])
+
         if self.is_train:
             self._seq_key_src_idx_pairs = self._full_index(
                 self._left_offset,                    # 0 when sampling dilation randomly
@@ -312,7 +317,7 @@ class scannetppDataset(Dataset):
         # Get the sequence key and frame indices
         if self.is_train:
             seq_key, period_idx, src_idx = self._seq_key_src_idx_pairs[index]
-            seq_len = len(self.color_paths[seq_key])
+            seq_len = len(self._pose_data[seq_key][period_idx]["poses"])
             pose_data = self._pose_data[seq_key][period_idx]
 
             if self.cfg.dataset.frame_sampling_method == "two_forward_one_back":
@@ -333,6 +338,7 @@ class scannetppDataset(Dataset):
 
         total_frame_num = len(src_and_tgt_frame_idxs)
         frame_names = list(range(total_frame_num))
+        have_depth = seq_key not in self._missing_scans
 
         inputs = {}
 
@@ -350,9 +356,10 @@ class scannetppDataset(Dataset):
             img_path =  self.dataset_folder / self.mode / seq_key / 'images' / img_name
             inputs_color, inputs_color_aug = self.process_image(img_path)
 
-            depth_name = pose_data['images'][frame_idx][:-4] + '.png'
-            depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
-            inputs_depth = self.process_depth(depth_path)
+            if have_depth:
+                depth_name = pose_data['images'][frame_idx][:-4] + '.png'
+                depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
+                inputs_depth = self.process_depth(depth_path)
 
             # Additional metadata
             first_img_name = pose_data['images'][0][:-4]  # The source frame
@@ -364,10 +371,10 @@ class scannetppDataset(Dataset):
             inputs[("inv_K_src", frame_name)] = inputs_inv_K_src
             inputs[("color", frame_name, 0)] = inputs_color
             inputs[("color_aug", frame_name, 0)] = inputs_color_aug
-            inputs[("depth", frame_name, 0)] = inputs_depth
             inputs[("T_c2w", frame_name)] = inputs_T_c2w
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
-        
+            if have_depth:
+                inputs[("depth", frame_name, 0)] = inputs_depth        
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 

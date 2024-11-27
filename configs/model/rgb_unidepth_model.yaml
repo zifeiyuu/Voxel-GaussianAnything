@@ -1,7 +1,7 @@
 defaults:
   - depth: unidepth
   - backbone: rgb_unidepth_encoder
-  - decoder_3d: v3_debug  #PT_decoder_debug
+  - decoder_3d: PT_decoder_debug  #PT_decoder_debug
 
 name: rgb_unidepth
 frame_ids: [0, -1, 1]

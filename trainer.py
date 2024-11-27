@@ -15,6 +15,7 @@ from models.encoder.layers import SSIM
 from evaluate import evaluate, get_model_instance
 from src.splatt3r_src.loss_mask import calculate_in_frustum_mask_single
 from torch.utils.tensorboard import SummaryWriter
+from IPython import embed
 
 class Trainer(nn.Module):
     def __init__(self, cfg):
@@ -91,6 +92,7 @@ class Trainer(nn.Module):
         if cfg.model.gaussian_rendering:
             # losses["loss/big_gauss_reg_loss"] = 0
             # losses["loss/gauss_offset_reg"] = 0
+            
             # regularize too big or too small gaussians
             if (big_g_lmbd := cfg.loss.gauss_scale.weight) > 0:
                 scaling = outputs["gauss_scaling"]
@@ -101,7 +103,39 @@ class Trainer(nn.Module):
                     big_gauss_reg_loss = 0
                 losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss
                 total_loss += big_g_lmbd * big_gauss_reg_loss
-            
+
+            #new offset loss
+            # offs_lmbd = cfg.loss.gauss_offset.weight
+            # pts3d_origin = rearrange(outputs["gauss_means_origin"], "b s c n -> b (s n) c")
+            # pts3d = rearrange(outputs["gauss_means"], "b s c n -> b (s n) c")
+            # B, N, C = pts3d_origin.shape
+            # K = pts3d.shape[1]  # This can be 2*N, 3*N, etc.
+            # expansion_factor = K // N
+            # # Prepare indices for expanded points corresponding to each original point
+            # indices = torch.arange(N, device=pts3d_origin.device).repeat_interleave(expansion_factor).view(1, -1, 1)
+            # indices = indices.expand(B, -1, C)
+            # # Gather corresponding predicted points
+            # corresponding_preds = torch.gather(pts3d, 1, indices)
+            # # Calculate MSE loss directly over all correspondences
+            # offset_loss = torch.mean((corresponding_preds - pts3d_origin.repeat(1, expansion_factor, 1)) ** 2)
+            # # Apply the weighting for the offset loss
+            # losses["loss/offset"] = offset_loss
+            # total_loss += offs_lmbd * offset_loss
+
+            # new offset loss (chamfer_distance)
+            # batch_size = pts3d.shape[0]
+            # dist = torch.cdist(pts3d_origin, pts3d)
+            # for i in range(batch_size):
+            #     # Compute distances for each batch element separately
+            #     dist = torch.cdist(pts3d_origin[i], pts3d[i])
+            #     min_dist_pc1_to_pc2 = torch.min(dist, dim=1)  # Min over M
+            #     min_dist_pc2_to_pc1 = torch.min(dist, dim=0)  # Min over N
+            #     # Aggregate the losses
+            #     offset_loss = min_dist_pc1_to_pc2.mean() + min_dist_pc2_to_pc1.mean()
+            #     losses["loss/offset"] += offset_loss  # Accumulate loss for batch
+            # losses["loss/offset"] /= batch_size  # Average over batch
+            # total_loss += offs_lmbd * losses["loss/offset"]
+
             # regularize too big offset
             if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:
                 offset = outputs["gauss_offset"]

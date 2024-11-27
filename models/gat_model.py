@@ -62,16 +62,17 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
+        pts3d_origin, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
         if self.use_decoder_3d:
             if self.normalize_before_decoder_3d:
                 # normalize points in each batch
-                mean = pts3d.mean(dim=1, keepdim=True) # (B, 1, 3)
-                z_median = torch.median(pts3d[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
-                pts3d = (pts3d - mean) / (z_median + 1e-6) # (B, N, 3)
+                mean = pts3d_origin.mean(dim=1, keepdim=True) # (B, 1, 3)
+                z_median = torch.median(pts3d_origin[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
+                pts3d = (pts3d_origin - mean) / (z_median + 1e-6) # (B, N, 3)
                 
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
+
             if self.normalize_before_decoder_3d:
                 # denormalize
                 pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
@@ -80,6 +81,9 @@ class GATModel(BaseModel):
         outputs = self.decoder_gs(torch.cat([pts3d, pts_feat], dim=-1))
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
+        
+        pts3d_origin = rearrange(pts3d_origin, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
+        outputs["gauss_means_origin"] = pts3d_origin
         outputs["gauss_means"] = pts3d_reshape
         # outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
         outputs["gauss_means"] = outputs["gauss_means"][:, :, :3, :]

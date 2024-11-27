@@ -83,14 +83,14 @@ def run_epoch(fabric,
             if step % cfg.run.save_frequency == 0 and step != 0:
                 trainer.model.save_model(optimiser, step, ema)
             # save the validation results
-            early_phase = (step < 20000) and (step % 2000 == 0) #500
+            early_phase = (step < 20000) and (step % 500 == 0) #500
             if early_phase or step % cfg.run.val_frequency == 0:
                 with torch.no_grad():
                     model_eval = ema if ema is not None else trainer.model
                     trainer.validate(model_eval, evaluator, val_loader, device=fabric.device)
 
         # Clean up and free GPU memory
-        if early_phase or step % cfg.run.val_frequency == 0 or step % 50 == 0: #################@@@@@@@@@@@@@@@@
+        if early_phase or step % cfg.run.val_frequency == 0 or step % 500 == 0: #################@@@@@@@@@@@@@@@@
             torch.cuda.empty_cache()
 
         # # Clear up loss and outputs to free memory

@@ -247,6 +247,8 @@ class Expand(nn.Module):
             offsets = einops.rearrange(offsets, "n (r c) -> n r c", r=self.expansion - 1) # (n, expansion-1, 3)
             offsets = torch.cat([torch.zeros_like(offsets[:, :1, :]), offsets], dim=1) # (n, expansion, 3)
             # offsets = torch.zeros_like(offsets[:, :, :])
+
+        # offsets = torch.tanh(offsets)
         
         new_p = p.unsqueeze(1) + offsets # (n, expansion, 3)
         new_p = new_p.reshape(-1, 3) # (n*expansion, 3)

@@ -34,7 +34,7 @@ scale_pose_by_depth: false
 test_split: mine
 
 #new
-specific_files: ['0a5c013435'] 
+specific_files: 
 random_selection: false
 
 #probably used to exclude the outer edges of the image？
