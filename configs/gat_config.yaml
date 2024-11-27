@@ -10,13 +10,13 @@ config:
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 2
+  batch_size: 16
   num_workers: 16
 
 train:
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
-  num_gpus: [1, 2, 3, 4, 5, 6] #[1, 2, 3, 4, 5, 6]
+  num_gpus: 7 #[1, 2, 3, 4, 5, 6]
   load_weights_folder: false
   ema:
     use: true
@@ -30,7 +30,7 @@ optimiser:
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
 
-  mode: linear
+  mode: none
   num_warmup_steps: 8000
   warmup_ratio: 2.0
   max_training_steps: 30000

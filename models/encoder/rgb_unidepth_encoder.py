@@ -221,7 +221,7 @@ class Rgb_unidepth_Encoder(nn.Module):
             pts_depth = rearrange(pts_depth, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=1)
             pts_feat = self.pts_feat_head(encoder_outputs) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*D)
             pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)
-
+        
         # back project depth to world splace
         scale = self.cfg.model.scales[0]
         pts3d = self.backproject_depth[str(scale)](pts_depth, inv_K)

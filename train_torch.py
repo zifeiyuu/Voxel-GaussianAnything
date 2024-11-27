@@ -45,7 +45,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         
         step = trainer.step
 
-        early_phase = batch_idx % trainer.cfg.run.log_frequency == 0 and step < 6000
+        early_phase = batch_idx % trainer.cfg.run.log_frequency == 0 and step < 10000
         learning_rate = lr_scheduler.get_lr()
         if isinstance(learning_rate, list):
             learning_rate = max(learning_rate)
@@ -55,7 +55,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
             trainer.log_scalars("train", outputs, losses, learning_rate)
 
             # Log model outputs and save the model at defined intervals
-            if early_phase or step % 2000 == 0:
+            if early_phase or step % 1000 == 0:
                 trainer.log("train", inputs, outputs)
 
             if step % cfg.run.save_frequency == 0 and step != 0:
@@ -106,12 +106,43 @@ def main(cfg: DictConfig):
     ddp_model = torch.nn.parallel.DistributedDataParallel(
         model.to(local_rank), device_ids=[local_rank], find_unused_parameters=True)
     
-    # Set up optimiser
-    optimiser = optim.Adam(model.get_parameter_groups(), cfg.optimiser.learning_rate)
-    def lr_lambda(step):
-        threshold = cfg.optimiser.scheduler_lambda_step_size
-        return 1.0 if step < threshold else 0.1
-    lr_scheduler = optim.lr_scheduler.LambdaLR(optimiser, lr_lambda)
+    # set up optimiser
+    # optimiser = optim.AdamW(model.parameters_to_train, lr=cfg.optimiser.learning_rate, weight_decay=cfg.optimiser.weight_decay) 
+    optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
+    num_warmup_steps = cfg.optimiser.num_warmup_steps
+    max_training_steps = cfg.optimiser.max_training_steps
+    min_lr_ratio = cfg.optimiser.min_lr_ratio
+
+    if cfg.optimiser.mode == 'cosine':
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimiser,
+            T_max=max_training_steps,  # sets the period of the cosine cycle
+            eta_min= min_lr_ratio * cfg.optimiser.learning_rate  # sets the minimum learning rate
+        )
+    elif cfg.optimiser.mode == 'linear':
+        def lr_linear(num_warmup_steps, num_training_steps, min_lr_ratio=0):
+            def lr_lambda(current_step):
+                if current_step < num_warmup_steps:
+                    return cfg.optimiser.warmup_ratio
+                # Linear decrease from 1 to min_lr_ratio
+                return max(min_lr_ratio, (num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps)))
+            
+            return lr_lambda
+        
+        lr_scheduler = optim.lr_scheduler.LambdaLR(
+            optimiser, 
+            lr_linear(num_warmup_steps, max_training_steps, min_lr_ratio)
+        )
+    else:
+        def lr_lambda(*args):
+            threshold = cfg.optimiser.scheduler_lambda_step_size
+            if trainer.step < threshold:
+                return 1.0
+            else:
+                return 0.1
+        lr_scheduler = optim.lr_scheduler.LambdaLR(
+            optimiser, lr_lambda
+        )
     
     # Set up Exponential Moving Average (EMA)
     if cfg.train.ema.use: 
