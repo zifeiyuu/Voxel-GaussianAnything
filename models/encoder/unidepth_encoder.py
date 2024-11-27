@@ -81,6 +81,7 @@ class UniDepthExtended(nn.Module):
                 depth_outs = self.unidepth.infer(inputs["color_aug", 0, 0], intrinsics=intrinsics)
 
         outputs_gauss = {}
+        
         # print(inputs[("K_src", 0)].shape)
         outputs_gauss[("K_src", 0)] = inputs[("K_src", 0)] if ("K_src", 0) in inputs.keys() else depth_outs["intrinsics"]
         outputs_gauss[("inv_K_src", 0)] = torch.linalg.inv(outputs_gauss[("K_src", 0)].float())

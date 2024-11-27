@@ -10,7 +10,11 @@ config:
   file: "gat_config.yaml"
 
 data_loader:
+<<<<<<< HEAD
   batch_size: 2
+=======
+  batch_size: 16
+>>>>>>> [TMP]
   num_workers: 16
 
 train:
@@ -42,7 +46,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 250
+  log_frequency: 1000
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5
@@ -56,7 +60,7 @@ scene_ids: []
 output_path: ./output
 
 #ckpt path could be defined by user now
-ckpt_path: ../../checkpoints  #./exp/re10k_v2/checkpoints
+ckpt_path: ./checkpoints  #./exp/re10k_v2/checkpoints
 
 add_mask: false #only used with depth input(scannetpp)
 

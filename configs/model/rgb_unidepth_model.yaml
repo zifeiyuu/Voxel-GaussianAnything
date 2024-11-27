@@ -8,7 +8,7 @@ frame_ids: [0, -1, 1]
 scales: [0]
 gauss_novel_frames: [-1, 1, 2] #
 
-use_decoder_3d: true
+use_decoder_3d: false
 normalize_before_decoder_3d: true
 
 min_depth: 0.1

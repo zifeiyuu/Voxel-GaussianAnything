@@ -168,3 +168,5 @@ experiments_out
 exp/
 submodules/UniDepth/pretrained/pytorch_model.bin
 output/
+submodules/diff-gaussian-rasterization-w-pose
+note.txt

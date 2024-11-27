@@ -59,7 +59,10 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                 trainer.log("train", inputs, outputs)
 
             if step % cfg.run.save_frequency == 0 and step != 0:
-                trainer.model.save_model(optimiser, step, ema)
+                if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
+                    trainer.model.module.save_model(optimiser, step, ema)
+                else:
+                    trainer.model.save_model(optimiser, step, ema)
 
             if step > 0 and (
                 early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
