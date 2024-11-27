@@ -40,11 +40,9 @@ class Trainer(nn.Module):
         base_dir = Path(__file__).resolve().parent
         self.output_path = base_dir / cfg.output_path
         self.output_path.resolve()
-        # Initialize TensorBoard
-        logging.info(f"Tensorboard dir: {os.path.join(self.output_path, 'tensorboard', cfg.config['exp_name'])}")
-        self.logger = SummaryWriter(log_dir=str(self.output_path / 'tensorboard' / cfg.config['exp_name']))
 
-    def set_logger(self):
+    def set_logger(self, cfg):
+        logging.info(f"Tensorboard dir: {os.path.join(self.output_path, 'tensorboard', cfg.config['exp_name'])}")
         self.logger = SummaryWriter(log_dir=str(self.output_path / 'tensorboard' / cfg.config['exp_name']))
         # self.logger = logger
 

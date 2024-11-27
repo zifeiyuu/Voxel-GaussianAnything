@@ -104,6 +104,8 @@ def main(cfg: DictConfig):
     # Set up model
     trainer = Trainer(cfg)
     # trainer.set_logger()
+    if local_rank == 0:
+        trainer.set_logger(cfg)
     model = trainer.model
 
     # Wrap model in DDP
