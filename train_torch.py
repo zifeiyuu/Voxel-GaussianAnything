@@ -55,13 +55,8 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
             trainer.log_scalars("train", outputs, losses, learning_rate)
 
             # Log model outputs and save the model at defined intervals
-<<<<<<< HEAD
             if early_phase or step % 1000 == 0:
                 trainer.log("train", inputs, outputs)
-=======
-            # if early_phase or step % 2000 == 0:
-            #     trainer.log("train", inputs, outputs)
->>>>>>> baad3d1fd399d44a144a83d98e78f577e7416025
 
             if step % cfg.run.save_frequency == 0 and step != 0:
                 if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
