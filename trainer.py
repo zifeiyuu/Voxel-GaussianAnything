@@ -2,7 +2,8 @@ import time
 import torch
 import torch.nn as nn
 import numpy as np
-
+import os
+import logging
 from einops import rearrange
 from pathlib import Path
 
@@ -40,10 +41,12 @@ class Trainer(nn.Module):
         self.output_path = base_dir / cfg.output_path
         self.output_path.resolve()
         # Initialize TensorBoard
-        self.writer = SummaryWriter(log_dir=str(self.output_path / 'tensorboard' / str(time.time())))
+        logging.info(f"Tensorboard dir: {os.path.join(self.output_path, 'tensorboard', cfg.config['exp_name'])}")
+        self.logger = SummaryWriter(log_dir=str(self.output_path / 'tensorboard' / cfg.config['exp_name']))
 
-    def set_logger(self, logger):
-        self.logger = logger
+    def set_logger(self):
+        self.logger = SummaryWriter(log_dir=str(self.output_path / 'tensorboard' / cfg.config['exp_name']))
+        # self.logger = logger
 
     def forward(self, inputs):
         outputs = self.model.forward(inputs)
@@ -185,19 +188,23 @@ class Trainer(nn.Module):
         logger = self.logger
         if logger is None:
             return
+        logger.add_scalar(f"{mode}/learning_rate", lr, self.step)
 
-        logger.log({f"{mode}/learning_rate": lr}, self.step)
-        logger.log({f"{mode}/{l}": v for l, v in losses.items()}, self.step)
+        for l, v in losses.items():
+            logger.add_scalar(f"{mode}/{l}", v, self.step)
+
         if cfg.model.gaussian_rendering:
-            logger.log({f"{mode}/gauss/scale/mean": torch.mean(outputs["gauss_scaling"])}, self.step)
+            logger.add_scalar(f"{mode}/gauss/scale/mean", torch.mean(outputs["gauss_scaling"]).item(), self.step)
 
             if self.cfg.model.predict_offset:
                 offset_mag = torch.linalg.vector_norm(outputs["gauss_offset"], dim=1)
                 mean_offset = offset_mag.mean()
-                logger.log({f"{mode}/gauss/offset/mean": mean_offset}, self.step)
+                logger.add_scalar(f"{mode}/gauss/offset/mean", mean_offset.item(), self.step)
+
         if cfg.dataset.scale_pose_by_depth:
             depth_scale = outputs[("depth_scale", 0)]
-            logger.log({f"{mode}/depth_scale": depth_scale.mean().item()}, self.step)
+            logger.add_scalar(f"{mode}/depth_scale", depth_scale.mean().item(), self.step)
+
 
     def log(self, mode, inputs, outputs):
         """Write images to Neptune
@@ -267,15 +274,16 @@ class Trainer(nn.Module):
         """
         if not output_path:
             output_path = self.output_path
+        breakpoint()
         score_dict_by_name = evaluate(model, self.cfg, evaluator, val_loader, device, self.cfg.save_vis, output_path)
         split = "val"
-        out = {}
-        for metric in evaluator.metric_names():
-            out[f"{split}/{metric}/avg"] = \
-                torch.tensor([scores[metric] for f_id, scores in score_dict_by_name.items() if f_id != 0]).mean().item()
-            for f_id, scores in score_dict_by_name.items():
-                out[f"{split}/{metric}/{f_id}"] = scores[metric]
-        if self.logger is not None:
-           self.logger.log(out, self.step)
+        # out = {}
+        # for metric in evaluator.metric_names():
+        #     out[f"{split}/{metric}/avg"] = \
+        #         torch.tensor([scores[metric] for f_id, scores in score_dict_by_name.items() if f_id != 0]).mean().item()
+        #     for f_id, scores in score_dict_by_name.items():
+        #         out[f"{split}/{metric}/{f_id}"] = scores[metric]
+        # if self.logger is not None:
+        #    self.logger.log(out, self.step)
         model_model = get_model_instance(model)
         model_model.set_train()

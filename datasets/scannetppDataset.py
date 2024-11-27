@@ -41,7 +41,7 @@ class scannetppDataset(Dataset):
             if not self.dataset_folder.exists():
                 raise FileNotFoundError(f"Relative path {relative_path} does not exist")
         elif not self.dataset_folder.exists():
-            raise fileNotFoundError(f"Absolute path {self.dataset_folder} does not exist")
+            raise FileNotFoundError(f"Absolute path {self.dataset_folder} does not exist")
         
         self.dataset_folder = self.dataset_folder.resolve()
 
