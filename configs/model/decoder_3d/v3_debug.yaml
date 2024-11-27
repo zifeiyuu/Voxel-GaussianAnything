@@ -4,7 +4,7 @@ in_channels: 35
 enable_flash: True
 output_dim: 64
 enc_dim: 64
-turn_off_bn: True
+turn_off_bn: False
 stride: [1,2]
 embedding_type: 'PT_embedding'
 enc_depths: [2, 6, 2]

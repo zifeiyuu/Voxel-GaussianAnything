@@ -112,8 +112,8 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
 
     dataloader_iter = iter(dataloader)
     now = datetime.now()
-    out_dir = output_path / f"{now:%Y-%m-%d}_{now:%H-%M-%S}"
-    out_dir.mkdir(exist_ok=True)
+    out_dir = output_path / cfg.config['exp_name'] / f"{now:%Y-%m-%d}_{now:%H-%M-%S}"
+    out_dir.mkdir(parents=True, exist_ok=True)
     spliced_images_list = []
     for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)], desc="Evaluating"):
         try:
