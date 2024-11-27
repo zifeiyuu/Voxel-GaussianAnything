@@ -70,6 +70,8 @@ class GATModel(BaseModel):
                 mean = pts3d_origin.mean(dim=1, keepdim=True) # (B, 1, 3)
                 z_median = torch.median(pts3d_origin[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
                 pts3d = (pts3d_origin - mean) / (z_median + 1e-6) # (B, N, 3)
+            else:
+                pts3d = pts3d_origin
                 
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
 
@@ -81,15 +83,15 @@ class GATModel(BaseModel):
         else:
             pts3d = pts3d_origin
             # predict gaussian parameters for each point
-            outputs = self.decoder_gs(torch.cat([pts3d, pts_rgb, pts_feat], dim=-1))
+            outputs = self.decoder_gs(torch.cat([pts_feat, pts3d, pts_rgb], dim=-1))
 
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         pts3d_origin = rearrange(pts3d_origin, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         outputs["gauss_means_origin"] = pts3d_origin
-        outputs["gauss_means"] = pts3d_reshape
+        outputs["gauss_means"] = pts3d_reshape[:, :, :3, :]
         # outputs["gauss_means"] = outputs["gauss_offset"] + pts3d_reshape
-        outputs["gauss_means"] = outputs["gauss_means"][:, :, :3, :]
+        # outputs["gauss_means"] = outputs["gauss_means"][:, :, :3, :]
 
         # if self.use_decoder_3d:
         #     pts3d2, pts_feat2 = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))

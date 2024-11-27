@@ -16,7 +16,7 @@ data_loader:
 train:
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
-  num_gpus: 7 #[1, 2, 3, 4, 5, 6]
+  num_gpus: 1 #[1, 2, 3, 4, 5, 6]
   load_weights_folder: false
   ema:
     use: true
