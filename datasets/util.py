@@ -8,12 +8,14 @@ from datasets.nyu.dataset import NYUv2Dataset
 from datasets.kitti import KITTIDataset
 from datasets.pixelsplatDataset import pixelsplatDataset
 from datasets.scannetppDataset import scannetppDataset
+from datasets.arkitscenesDataset import arkitscenesDataset
 
 def create_datasets(cfg, split="val", distributed=False, rank=0):
 
     datasets_dict = {
         "pixelsplat": pixelsplatDataset,
         "scannetpp": scannetppDataset,
+        "arkitscenes": arkitscenesDataset
     }[cfg.dataset.name]
 
     dataset = datasets_dict(cfg, split)

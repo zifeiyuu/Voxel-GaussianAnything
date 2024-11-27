@@ -17,6 +17,8 @@ from datasets.data import process_projs, data_to_c2w, pil_loader, get_sparse_dep
 from datasets.tardataset import TarDataset
 from misc.localstorage import copy_to_local_storage, extract_tar, get_local_dir
 
+from IPython import embed
+
 class pixelsplatDataset(Dataset):
     def __init__(self, cfg, split):
         # Load the configuration from YAML file
@@ -95,7 +97,10 @@ class pixelsplatDataset(Dataset):
 
         self._pose_data = self._load_pose_data()
 
-        self._seq_keys = list(self._pose_data.keys())
+        if self.specific_files:
+            self._seq_keys = self.specific_files
+        else:
+            self._seq_keys = list(self._pose_data.keys())
 
         # self._seq_keys = [i for i in self._seq_keys if i.startswith("0a004eb4d08f31dc")] #########################@@@@@@@@@@@@@@@@@
 

@@ -103,7 +103,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     
     score_dict = {}
     match cfg.dataset.name:
-        case "pixelsplat" | "scannetpp":
+        case "pixelsplat" | "scannetpp" | "arkitscenes":
             # Override the frame indices used for evaluation
             target_frame_ids = [1, 2, 3]
             eval_frames = ["src", "tgt5", "tgt10", "tgt_rand"]
