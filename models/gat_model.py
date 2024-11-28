@@ -81,6 +81,9 @@ class GATModel(BaseModel):
             # predict gaussian parameters for each point
             outputs = self.decoder_gs(torch.cat([pts3d, pts_feat], dim=-1))
         else:
+            mean = pts3d_origin.mean(dim=1, keepdim=True) # (B, 1, 3)
+            z_median = torch.median(pts3d_origin[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
+            pts3d_normed = (pts3d_origin - mean) / (z_median + 1e-6) # (B, N, 3)
             pts3d = pts3d_origin
             # predict gaussian parameters for each point
             outputs = self.decoder_gs(torch.cat([pts_feat, pts3d, pts_rgb], dim=-1))
