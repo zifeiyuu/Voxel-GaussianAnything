@@ -51,7 +51,6 @@ class PointTransformerDecoder(nn.Module):
         # forward through PointTransformer
             pts3d, pts_feat, offsets = self.transformer(data_dict)
 
-
         # unflatten B and N dimensions, note that N may change after PointTransformer
         pts3d = rearrange(pts3d, "(B N) C -> B N C", B=B)
         pts_feat = rearrange(pts_feat, "(B N) C -> B N C", B=B)

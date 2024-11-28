@@ -24,7 +24,8 @@ hydra-core
 jaxtyping
 hydra-submitit-launcher
 submitit
-diff-gaussian-rasterization @ git+https://github.com/eldar/diff-gaussian-rasterization-w-pose@main
+# diff-gaussian-rasterization @ git+https://github.com/eldar/diff-gaussian-rasterization-w-pose@main
+diff-gaussian-rasterization @ git+ssh://git@github.com/eldar/diff-gaussian-rasterization-w-pose.git@main
 GitPython
 lightning
 ema-pytorch
