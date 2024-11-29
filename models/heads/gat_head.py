@@ -7,6 +7,7 @@ from ..decoder.gaussian_decoder import GaussianDecoder, get_splits_and_inits
 from ..heads import head_factory
 from .dpt_gs_head import create_gs_head
 from IPython import embed
+import random
 
 class LinearHead(nn.Module):
     def __init__(self, cfg):
@@ -21,9 +22,8 @@ class LinearHead(nn.Module):
         self.parameters_to_train = []
 
         # linear decoder
-        self.gaussian_head = nn.Linear(32 + 3 + 3, self.num_output_channels)
+        self.gaussian_head = nn.Linear(36, self.num_output_channels)
         self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
-
         # gaussian parameters initialisation
         start_channel = 0
         for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
@@ -32,10 +32,20 @@ class LinearHead(nn.Module):
             nn.init.constant_(
                 self.gaussian_head.bias[start_channel:start_channel+out_channel], bias)
             start_channel += out_channel
-
+        # for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
+        #     nn.init.xavier_uniform_(
+        #         self.gaussian_head.weight[start_channel:start_channel+out_channel, :], 1)
+        #     nn.init.constant_(
+        #         self.gaussian_head.bias[start_channel:start_channel+out_channel], 0)
+        #     start_channel += out_channel
+        # for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
+        #     nn.init.xavier_uniform_(
+        #         self.gaussian_head.weight[start_channel:start_channel+out_channel, :], random.randrange(0, 5))
+        #     nn.init.constant_(
+        #         self.gaussian_head.bias[start_channel:start_channel+out_channel], 0)
+        #     start_channel += out_channel  
         # gaussian parameters activation
         self.gaussian_decoder = GaussianDecoder(cfg)
-        self.parameters_to_train += [{"params": self.gaussian_decoder.parameters()}]
 
     def get_parameter_groups(self):
         return self.parameters_to_train

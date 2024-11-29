@@ -10,7 +10,7 @@ config:
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 16
+  batch_size: 1
   num_workers: 16
 
 train:
@@ -42,7 +42,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 1000
+  log_frequency: 500
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5

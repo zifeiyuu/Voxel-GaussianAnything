@@ -14,7 +14,6 @@ from pytorch_lightning import seed_everything
 from lightning.fabric import Fabric
 from lightning.fabric.strategies import DDPStrategy
 
-# from misc.logger import setup_logger
 from evaluation.evaluator import Evaluator
 from datasets.util import create_datasets
 from trainer import Trainer
@@ -36,16 +35,20 @@ def run_epoch(fabric,
     if fabric.is_global_zero:
         logging.info("Training on epoch {}".format(trainer.epoch))
 
-    # max_iterations = 25002
     for batch_idx, inputs in enumerate(tqdm(train_loader, desc="Training", 
                                             total=len(train_loader), dynamic_ncols=True)):
         step = trainer.step
-        # if step >= max_iterations:
-        #     break
-        # instruct the model which novel frames to render
         inputs["target_frame_ids"] = cfg.model.gauss_novel_frames
         losses, outputs = trainer(inputs)
-        
+
+        if trainer.logger:
+            # Log losses
+            total_loss = losses["loss/total"]
+            trainer.logger.add_scalar('Loss/total', total_loss, trainer.step)
+            if cfg.model.gaussian_rendering:
+                trainer.logger.add_scalar('Loss/gaussian_regularization', losses["loss/big_gauss_reg_loss"], trainer.step)
+                trainer.logger.add_scalar('Loss/reconstruction', losses["loss/rec"], trainer.step) 
+
         optimiser.zero_grad(set_to_none=True)
         fabric.backward(losses["loss/total"])
         optimiser.step()
@@ -53,7 +56,7 @@ def run_epoch(fabric,
         if ema is not None:
             ema.update()
 
-        early_phase = batch_idx % trainer.cfg.run.log_frequency == 0 and step < 6000
+        early_phase = batch_idx % trainer.cfg.run.log_frequency == 0 and step < 10000
         if fabric.is_global_zero:
             learning_rate = lr_scheduler.get_lr()
             if isinstance(learning_rate, list):
@@ -118,6 +121,7 @@ def main(cfg: DictConfig):
 
     # set up model
     trainer = Trainer(cfg)
+    trainer.set_logger(cfg, 'no')
     model = trainer.model
 
     # set up optimiser
@@ -183,8 +187,6 @@ def main(cfg: DictConfig):
     train_dataset, train_loader = create_datasets(cfg, split="train")
     train_loader = fabric.setup_dataloaders(train_loader)
     if fabric.is_global_zero:
-        # if cfg.train.logging:
-        #     trainer.set_logger(setup_logger(cfg))
         val_dataset, val_loader = create_datasets(cfg, split="val") 
         evaluator = Evaluator()
         evaluator = fabric.to_device(evaluator)
