@@ -13,6 +13,7 @@ from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
 from IPython import embed
 from matplotlib import pyplot as plt
 import numpy as np
+import scipy
 
 from submodules.extra import project_point_cloud_to_depth_map, save_point_cloud_with_plyfile
 
@@ -34,6 +35,7 @@ class BaseModel(nn.Module):
         self.cfg = cfg
 
         self.parameters_to_train = []
+        self.predict_sh_offset = cfg.model.predict_sh_offset
     
     def get_parameter_groups(self):
         return self.parameters_to_train
@@ -56,7 +58,7 @@ class BaseModel(nn.Module):
 
     def is_train(self):
         return self.training
-    
+
     @torch.no_grad()
     def process_gt_poses(self, inputs, outputs):
         cfg = self.cfg
@@ -124,6 +126,12 @@ class BaseModel(nn.Module):
         """
         cfg = self.cfg
         B, _, H, W = inputs["color", 0, 0].shape
+
+        if self.predict_sh_offset and cfg.model.max_sh_degree == 0:
+            inputs_sh = self.rgb_to_sh0(inputs["color", 0, 0])
+            inputs_sh = rearrange(inputs_sh, "b c h w -> b c (h w)").unsqueeze(1)
+            outputs["gauss_features_dc"] = outputs["gauss_features_dc"] + inputs_sh
+
         for scale in [0]: #cfg.model.scales:
             pos_input_frame = outputs["gauss_means"].float()
             K = inputs[("K_tgt", 0)]
@@ -149,11 +157,6 @@ class BaseModel(nn.Module):
                     "rotation": rearrange(outputs["gauss_rotation"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
                     "features_dc": rearrange(outputs["gauss_features_dc"], "b n c l -> b (n l) 1 c", n=self.cfg.model.gaussians_per_pixel)
                 }
-                    # "xyz": rearrange(pos, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
-                    # "opacity": rearrange(outputs["gauss_opacity"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
-                    # "scaling": rearrange(outputs["gauss_scaling"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
-                    # "rotation": rearrange(outputs["gauss_rotation"], "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel),
-                    # "features_dc": rearrange(outputs["gauss_features_dc"], "b s c n -> b (s n) 1 c", s=self.cfg.model.gaussians_per_pixel)
 
                 if cfg.model.max_sh_degree > 0:
                     point_clouds["features_rest"] = rearrange(
@@ -213,7 +216,6 @@ class BaseModel(nn.Module):
                         (H, W),
                         bg_color,
                         cfg.model.max_sh_degree
-                        # override_color = torch.tensor([[1., 1., 1.]], device=device)
                     )
                     rgb = out["render"]
                     rgbs.append(rgb)
@@ -275,3 +277,19 @@ class BaseModel(nn.Module):
         if optimiser is not None:
             optimiser.load_state_dict(state_dict["optimiser"])
             self.step = state_dict["step"]
+
+
+    def rgb_to_sh0(self, rgb_tensor):
+        """
+        Convert a batch tensor of RGB values in range [0, 1] to SH0 coefficients.
+        
+        Args:
+        - rgb_tensor (Tensor): A tensor of shape (B, 3, H, W) with RGB values normalized to [0, 1].
+        
+        Returns:
+        - Tensor: SH0 coefficients for each channel at each pixel in each image of the batch.
+        """
+        factor = 1 / (2 * np.sqrt(np.pi))
+        sh0_coeffs = rgb_tensor * factor
+        return sh0_coeffs
+    

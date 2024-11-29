@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "sh=0_4gpu"
+  exp_name: "debug_sh_offset_1"
   file: "gat_config.yaml"
 
 data_loader:

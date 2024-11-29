@@ -4,7 +4,6 @@ import numpy as np
 
 from IPython import embed
 
-
 def get_splits_and_inits(cfg):
     split_dimensions = []
     scale_inits = []
@@ -17,10 +16,16 @@ def get_splits_and_inits(cfg):
             bias_inits += [cfg.model.xyz_bias]
 
         split_dimensions += [1, 3, 4, 3]
-        scale_inits += [cfg.model.opacity_scale, 
-                        cfg.model.scale_scale,
-                        1.0,
-                        5.0]
+        if cfg.model.predict_sh_offset and cfg.model.max_sh_degree == 0:  #predict sh offset in this case, not predict sh
+            scale_inits += [cfg.model.opacity_scale, 
+                            cfg.model.scale_scale,
+                            1.0,
+                            cfg.model.sh_offset_scale]
+        else:
+            scale_inits += [cfg.model.opacity_scale, 
+                            cfg.model.scale_scale,
+                            1.0,
+                            5.0]
         bias_inits += [cfg.model.opacity_bias,
                         np.log(cfg.model.scale_bias),
                         0.0,

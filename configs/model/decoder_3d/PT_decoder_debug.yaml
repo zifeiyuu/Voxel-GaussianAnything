@@ -1,50 +1,22 @@
-# name: PT_decoder
-
-# in_channels: 35
-# patch_embed_depth: 1
-# patch_embed_channels: 36
-# patch_embed_groups: 4
-# patch_embed_neighbours: 8
-# first_random_downsample: 1
-# enc_depths: [1, 2, 1]
-# enc_channels: [64, 128, 256]
-# enc_stride: [4, 2, 2]
-# # grid_sizes: [0.12, 0.24, 0.48]
-# enc_groups: [8, 16, 32]
-# enc_neighbours: [8, 8, 8]
-# dec_depths: [1, 1, 1]
-# dec_use_cross_attn: true
-# dec_channels: [36, 64, 128]
-# dec_groups: [4, 8, 16]
-# dec_neighbours: [8, 8, 8]
-# attn_qkv_bias: false
-# pe_multiplier: true
-# pe_bias: true
-# attn_drop_rate: 0.0
-# drop_path_rate: 0.0
-# final_expansion: 2
-# norm_layer: ln
-# enable_checkpoint: false
-
 name: PT_decoder
 
 in_channels: 35
 patch_embed_depth: 1
-patch_embed_channels: 36
+patch_embed_channels: 64
 patch_embed_groups: 4
 patch_embed_neighbours: 8
 first_random_downsample: 1
-enc_depths: [1, 1]
-enc_channels: [64, 128]
-enc_stride: [4, 2]
+enc_depths: [1, 2, 1]
+enc_channels: [64, 128, 256]
+enc_stride: [4, 2, 2]
 # grid_sizes: [0.12, 0.24, 0.48]
-enc_groups: [8, 16]
-enc_neighbours: [8, 8]
-dec_depths: [1, 1]
+enc_groups: [8, 16, 32]
+enc_neighbours: [8, 8, 8]
+dec_depths: [1, 1, 1]
 dec_use_cross_attn: true
-dec_channels: [36, 64]
-dec_groups: [4, 8]
-dec_neighbours: [8, 8]
+dec_channels: [64, 64, 128]
+dec_groups: [4, 8, 16]
+dec_neighbours: [8, 8, 8]
 attn_qkv_bias: false
 pe_multiplier: true
 pe_bias: true
@@ -53,3 +25,31 @@ drop_path_rate: 0.0
 final_expansion: 2
 norm_layer: ln
 enable_checkpoint: false
+
+# name: PT_decoder
+
+# in_channels: 35
+# patch_embed_depth: 1
+# patch_embed_channels: 48
+# patch_embed_groups: 4
+# patch_embed_neighbours: 8
+# first_random_downsample: 1
+# enc_depths: [1, 1]
+# enc_channels: [64, 128]
+# enc_stride: [4, 2]
+# # grid_sizes: [0.12, 0.24, 0.48]
+# enc_groups: [8, 16]
+# enc_neighbours: [8, 8]
+# dec_depths: [1, 1]
+# dec_use_cross_attn: true
+# dec_channels: [48, 64]
+# dec_groups: [4, 8]
+# dec_neighbours: [8, 8]
+# attn_qkv_bias: false
+# pe_multiplier: true
+# pe_bias: true
+# attn_drop_rate: 0.0
+# drop_path_rate: 0.0
+# final_expansion: 2
+# norm_layer: ln
+# enable_checkpoint: false
