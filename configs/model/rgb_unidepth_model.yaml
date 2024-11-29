@@ -18,7 +18,7 @@ max_depth: 20
 gaussians_per_pixel: 1
 gaussian_rendering: true
 randomise_bg_colour: true
-max_sh_degree: 1
+max_sh_degree: 0
 scaled_offset: false
 one_gauss_decoder: false
 predict_offset: false #
@@ -26,17 +26,11 @@ bg_colour: [0.5, 0.5, 0.5]
 shift_rays_half_pixel: forward
 
 depth_type: depth_inc
-depth_scale: 0.1
-xyz_scale: 0.2 ####useful change
-opacity_scale: 1.0  ####useful change
+depth_scale: 1.0
+xyz_scale: 1e-02
+opacity_scale: 1e-3
 scale_scale: 1e-1
 sh_scale: 1.0
-# depth_type: depth_inc
-# depth_scale: 1.0
-# xyz_scale: 1e-02
-# opacity_scale: 1e-3
-# scale_scale: 1e-1
-# sh_scale: 1.0
 
 scale_lambda: 0.01
 depth_bias: -0.1

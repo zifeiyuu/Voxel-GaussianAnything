@@ -27,6 +27,8 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
 
     logging.info("Training on epoch {}".format(trainer.epoch))
 
+    accumulation_steps = cfg.optimiser.accumulation_steps
+
     for batch_idx, inputs in enumerate(tqdm(train_loader, desc="Training", total=len(train_loader), dynamic_ncols=True)):
         # Instruct the model which novel frames to render
         inputs["target_frame_ids"] = cfg.model.gauss_novel_frames
@@ -36,13 +38,20 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         
         losses, outputs = trainer(inputs)
 
-        optimiser.zero_grad(set_to_none=True)
-        losses["loss/total"].backward()  # Backpropagate the total loss
-        optimiser.step()
+        # Scale losses by accumulation steps
+        loss_total = losses["loss/total"] / accumulation_steps
 
-        if ema is not None:
-            ema.update()
-        
+        loss_total.backward()  # Backpropagate the scaled loss
+
+        # Perform optimization step after every `accumulation_steps`
+        if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(train_loader):
+            optimiser.step()
+            optimiser.zero_grad(set_to_none=True)  # Reset gradients
+
+            if ema is not None:
+                ema.update()
+
+        # Update step and log
         step = trainer.step
 
         early_phase = batch_idx % trainer.cfg.run.log_frequency == 0 and step < 10000
@@ -50,13 +59,8 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         if isinstance(learning_rate, list):
             learning_rate = max(learning_rate)
 
-        # Log training metrics
         if local_rank == 0:  # Only log from the main process
             trainer.log_scalars("train", outputs, losses, learning_rate)
-
-            # Log model outputs and save the model at defined intervals
-            # if early_phase or step % 1000 == 0:
-            #     trainer.log("train", inputs, outputs)
 
             if step % cfg.run.save_frequency == 0 and step != 0:
                 if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
@@ -74,8 +78,9 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         if early_phase or step % cfg.run.val_frequency == 0:
             torch.cuda.empty_cache()
 
-        trainer.step += 1
+        trainer.step += 1 / accumulation_steps  # Account for fractional steps
         lr_scheduler.step()
+
 
 def set_seed_everywhere(seed):
     torch.manual_seed(seed)

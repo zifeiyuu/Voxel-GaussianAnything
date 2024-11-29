@@ -1,7 +1,7 @@
 numpy==1.26.4
-# torch==2.2.2
-# torchvision
-# torchaudio
+torch==2.2.2
+torchvision
+torchaudio
 einops
 huggingface-hub>=0.22.0
 imageio
@@ -25,6 +25,7 @@ jaxtyping
 hydra-submitit-launcher
 submitit
 # diff-gaussian-rasterization @ git+https://github.com/eldar/diff-gaussian-rasterization-w-pose@main
+diff-gaussian-rasterization @ git+ssh://git@github.com/eldar/diff-gaussian-rasterization-w-pose.git@main
 GitPython
 lightning
 ema-pytorch
@@ -32,3 +33,5 @@ pytubefix
 torch_scatter
 torch_geometric
 tensorboard
+IPython
+addict

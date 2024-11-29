@@ -22,7 +22,7 @@ class LinearHead(nn.Module):
         self.parameters_to_train = []
 
         # linear decoder
-        self.gaussian_head = nn.Linear(36, self.num_output_channels)
+        self.gaussian_head = nn.Linear(64, self.num_output_channels)
         self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
         # gaussian parameters initialisation
         start_channel = 0
