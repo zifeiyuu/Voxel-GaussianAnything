@@ -113,6 +113,12 @@ def main(cfg: DictConfig):
         trainer.set_logger(cfg)
     model = trainer.model
 
+    # if hasattr(model.encoder, 'unidepth'):
+    #     model.encoder.unidepth = model.encoder.unidepth.to(local_rank)
+    #     # if any(param.requires_grad for param in model.encoder.unidepth.parameters()):
+    #     model.encoder.unidepth = torch.nn.parallel.DistributedDataParallel(
+    #         model.encoder.unidepth, device_ids=[local_rank], find_unused_parameters=True)
+
     # Wrap model in DDP
     ddp_model = torch.nn.parallel.DistributedDataParallel(
         model.to(local_rank), device_ids=[local_rank], find_unused_parameters=True)

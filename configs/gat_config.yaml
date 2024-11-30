@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "debug_sh_offset_1"
+  exp_name: "debug"
   file: "gat_config.yaml"
 
 data_loader:

@@ -15,6 +15,8 @@ from .geometric import generate_rays
 from .helper import freeze_all_params, _paddings, _shapes, _preprocess, _postprocess
 from .layers import BackprojectDepth
 
+import torch.distributed as dist
+
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 unidepth_path = os.path.join(base_dir, 'submodules/UniDepth')
 sys.path.insert(0, unidepth_path)
@@ -32,10 +34,12 @@ class Rgb_unidepth_Encoder(nn.Module):
         self.pts_feat_dim = cfg.model.backbone.pts_feat_dim
         self.use_unidepth_decoder = cfg.model.backbone.use_unidepth_decoder
 
+        local_rank = dist.get_rank()
         self.unidepth = UniDepth(
             version=cfg.model.depth.version, 
             backbone=cfg.model.depth.backbone, 
-            pretrained=True
+            pretrained=True,
+            device=f'cuda:{local_rank}'
         )
         # self.unidepth.image_shape = [cfg.dataset.height, cfg.dataset.width]
         print("Unidepth_v1 loaded!")
@@ -217,9 +221,9 @@ class Rgb_unidepth_Encoder(nn.Module):
             pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)                
         else:
             # linear layer to decode
-            pts_depth = self.pts_head(original_encoder_outputs[-1]) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*1)
+            pts_depth = self.pts_head(original_encoder_outputs[0]) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*1)
             pts_depth = rearrange(pts_depth, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=1)
-            pts_feat = self.pts_feat_head(encoder_outputs) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*D)
+            pts_feat = self.pts_feat_head(original_encoder_outputs[0]) # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*D)
             pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)
         
         # back project depth to world splace

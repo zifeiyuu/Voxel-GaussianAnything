@@ -28,7 +28,7 @@ bg_colour: [0.5, 0.5, 0.5]
 shift_rays_half_pixel: forward
 
 predict_sh_offset: true
-sh_offset_scale: 1.0
+sh_offset_scale: 0.09
 
 depth_type: depth_inc
 depth_scale: 1.0
