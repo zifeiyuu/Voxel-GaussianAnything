@@ -81,7 +81,6 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         trainer.step += 1 / accumulation_steps  # Account for fractional steps
         lr_scheduler.step()
 
-
 def set_seed_everywhere(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
