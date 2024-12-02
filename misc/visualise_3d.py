@@ -1,4 +1,5 @@
 import torch
+import os
 import numpy as np
 from pathlib import Path
 from einops import rearrange, einsum
@@ -12,6 +13,7 @@ from scipy.spatial.transform import Rotation as R
 from misc.depth import normalize_depth_for_display
 from models.encoder.layers import Project3DSimple
 
+from IPython import embed
 
 def depth_to_img(d):
     d = d.detach().cpu().numpy()
@@ -167,6 +169,7 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         opacities = rearrange(outputs["gauss_opacity"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
     elif name == "gat" or name == "rgb_unidepth":
+        embed()
         # "xyz": rearrange(pos, "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
         # "opacity": rearrange(outputs["gauss_opacity"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
         # "scaling": rearrange(outputs["gauss_scaling"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
@@ -189,3 +192,22 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         opacities,
         path
     )
+
+def save_ply_new(outputs, path, gaussians_per_pixel=3):
+    mkdir_p(os.path.dirname(path))
+
+    xyz = self._xyz.detach().cpu().numpy()
+    normals = np.zeros_like(xyz)
+    f_dc = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
+    f_rest = self._features_rest.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
+    opacities = self._opacity.detach().cpu().numpy()
+    scale = self._scaling.detach().cpu().numpy()
+    rotation = self._rotation.detach().cpu().numpy()
+
+    dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
+
+    elements = np.empty(xyz.shape[0], dtype=dtype_full)
+    attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
+    elements[:] = list(map(tuple, attributes))
+    el = PlyElement.describe(elements, 'vertex')
+    PlyData([el]).write(path)

@@ -12,4 +12,7 @@ python evaluate.py \
     # +dataset.crop_border=true \
 
 
-
+python evaluate.py \
+    +experiment=layered_re10k \
+    dataset.test_split_path=splits/re10k_mine_filtered/test_files.txt \
+    model.depth.version=v1 

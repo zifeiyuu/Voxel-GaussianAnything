@@ -5,13 +5,16 @@ defaults:
 name: unidepth
 frame_ids: [0, -1, 1]
 scales: [0]
-gauss_novel_frames: [1, 2, 3] #
+gauss_novel_frames: [-1, 1, 2] #
 
 min_depth: 0.1
 max_depth: 100
 
+predict_sh_offset: false
+sh_offset_scale: 0.09
+
 # gaussian parameters
-gaussians_per_pixel: 2
+gaussians_per_pixel: 1
 gaussian_rendering: true
 randomise_bg_colour: true
 max_sh_degree: 1

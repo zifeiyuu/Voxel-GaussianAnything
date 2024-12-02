@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "debug"
+  exp_name: "debug_"
   file: "gat_config.yaml"
 
 data_loader:
@@ -30,11 +30,13 @@ optimiser:
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
   accumulation_steps: 16
-  mode: none
-  num_warmup_steps: 8000
+  mode: cosine
+  num_warmup_steps: 0
   warmup_ratio: 2.0
-  max_training_steps: 30000
+  max_training_steps: 60000
   min_lr_ratio: 0.3
+  grad_clip: false
+  max_norm: 1.0
 
 run:
   resume_ckpt: null

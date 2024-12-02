@@ -113,18 +113,14 @@ def main(cfg: DictConfig):
         trainer.set_logger(cfg)
     model = trainer.model
 
-    # if hasattr(model.encoder, 'unidepth'):
-    #     model.encoder.unidepth = model.encoder.unidepth.to(local_rank)
-    #     # if any(param.requires_grad for param in model.encoder.unidepth.parameters()):
-    #     model.encoder.unidepth = torch.nn.parallel.DistributedDataParallel(
-    #         model.encoder.unidepth, device_ids=[local_rank], find_unused_parameters=True)
-
     # Wrap model in DDP
     ddp_model = torch.nn.parallel.DistributedDataParallel(
         model.to(local_rank), device_ids=[local_rank], find_unused_parameters=True)
     
     # set up optimiser
     # optimiser = optim.AdamW(model.parameters_to_train, lr=cfg.optimiser.learning_rate, weight_decay=cfg.optimiser.weight_decay) 
+    if cfg.optimiser.grad_clip:
+        torch.nn.utils.clip_grad_norm_(model.parameters_to_train, max_norm=cfg.optimiser.max_norm)
     optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
     num_warmup_steps = cfg.optimiser.num_warmup_steps
     max_training_steps = cfg.optimiser.max_training_steps

@@ -126,6 +126,8 @@ def main(cfg: DictConfig):
 
     # set up optimiser
     # optimiser = optim.AdamW(model.parameters_to_train, lr=cfg.optimiser.learning_rate, weight_decay=cfg.optimiser.weight_decay) 
+    if cfg.optimiser.grad_clip:
+        torch.nn.utils.clip_grad_norm_(model.parameters_to_train, max_norm=1.0)
     optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
     num_warmup_steps = cfg.optimiser.num_warmup_steps
     max_training_steps = cfg.optimiser.max_training_steps

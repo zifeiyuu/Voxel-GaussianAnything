@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  ## originally only [reconstruction] loss
 
 config:
-  exp_name: "debug"
+  exp_name: "flash3d"
   file: "config.yaml"
 
 data_loader:
