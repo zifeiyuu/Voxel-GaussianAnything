@@ -6,11 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-<<<<<<< HEAD
-  exp_name: "debug_"
-=======
   exp_name: "point_trans_feat_only_clip0.2"
->>>>>>> d96d31049ab0a46aa1b2a2e1cce14ddcd32a1ad1
   file: "gat_config.yaml"
 
 data_loader:
