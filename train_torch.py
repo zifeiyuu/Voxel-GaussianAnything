@@ -43,6 +43,13 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
 
         loss_total.backward()  # Backpropagate the scaled loss
 
+        # Gradient clipping
+        max_grad_norm = 0.2  # Set the desired maximum gradient norm
+        if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
+            torch.nn.utils.clip_grad_norm_(trainer.model.module.parameters(), max_grad_norm)
+        else:
+            torch.nn.utils.clip_grad_norm_(trainer.model.parameters(), max_grad_norm)
+
         # Perform optimization step after every `accumulation_steps`
         if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(train_loader):
             optimiser.step()

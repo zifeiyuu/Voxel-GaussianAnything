@@ -57,6 +57,7 @@ class Trainer(nn.Module):
         else:
             mask = None
         losses = self.compute_losses(inputs, outputs, mask)
+        self.get_grad_norm(outputs)
         return losses, outputs
     
     def compute_reconstruction_loss(self, pred, target, losses):
@@ -137,6 +138,24 @@ class Trainer(nn.Module):
         losses["loss/total"] = total_loss
         return losses
     
+    def get_grad_norm(self, outputs):
+        # Compute gradient norm
+        grad_norm = 0.0
+
+        # Check if model is wrapped in DistributedDataParallel
+        if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+            parameters = self.model.module.parameters()
+        else:
+            parameters = self.model.parameters()
+
+        # Compute the gradient norm across all parameters
+        for param in parameters:
+            if param.grad is not None:
+                grad_norm += param.grad.data.norm(2).item() ** 2
+        grad_norm = grad_norm ** 0.5
+        outputs["grad_norm"] = grad_norm
+        
+    
     def log_time(self, batch_idx, duration, loss):
         """Print a logging statement to the terminal
         """
@@ -156,6 +175,7 @@ class Trainer(nn.Module):
         if logger is None:
             return
         logger.add_scalar(f"{mode}/learning_rate", lr, self.step)
+        logger.add_scalar(f"{mode}/grad_norm", outputs['grad_norm'], self.step)
 
         for l, v in losses.items():
             logger.add_scalar(f"{mode}/{l}", v, self.step)
