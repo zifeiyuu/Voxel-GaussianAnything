@@ -6,11 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-<<<<<<< HEAD
-  exp_name: "debug_"
-=======
-  exp_name: "point_trans_feat_only_clip0.2"
->>>>>>> d96d31049ab0a46aa1b2a2e1cce14ddcd32a1ad1
+  exp_name: "vis_debug"
   file: "gat_config.yaml"
 
 data_loader:
@@ -21,7 +17,7 @@ train:
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
   num_gpus: 1 #[1, 2, 3, 4, 5, 6]
-  load_weights_folder: false
+  load_weights_folder: true ####
   ema:
     use: true
     update_every: 10
@@ -34,17 +30,13 @@ optimiser:
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
   accumulation_steps: 16
-  mode: cosine
-<<<<<<< HEAD
+  mode: none
   num_warmup_steps: 0
-=======
-  num_warmup_steps: 8000
->>>>>>> d96d31049ab0a46aa1b2a2e1cce14ddcd32a1ad1
   warmup_ratio: 2.0
   max_training_steps: 60000
   min_lr_ratio: 0.3
-  grad_clip: false
-  max_norm: 1.0
+  grad_clip: true
+  max_norm: 0.2
 
 run:
   resume_ckpt: null
@@ -52,7 +44,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 500
+  log_frequency: 1000
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5
@@ -66,7 +58,7 @@ scene_ids: []
 output_path: ./output
 
 #ckpt path could be defined by user now
-ckpt_path: ./checkpoints  #./exp/re10k_v2/checkpoints
+ckpt_path: ./exp/checkpoints  #./exp/re10k_v2/checkpoints
 
 add_mask: false #only used with depth input(scannetpp)
 

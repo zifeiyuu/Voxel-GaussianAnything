@@ -34,13 +34,21 @@ class Rgb_unidepth_Encoder(nn.Module):
         self.pts_feat_dim = cfg.model.backbone.pts_feat_dim
         self.use_unidepth_decoder = cfg.model.backbone.use_unidepth_decoder
 
-        local_rank = dist.get_rank()
-        self.unidepth = UniDepth(
-            version=cfg.model.depth.version, 
-            backbone=cfg.model.depth.backbone, 
-            pretrained=True,
-            device=f'cuda:{local_rank}'
-        )
+        if dist.is_initialized():
+            local_rank = dist.get_rank()
+            self.unidepth = UniDepth(
+                version=cfg.model.depth.version, 
+                backbone=cfg.model.depth.backbone, 
+                pretrained=True,
+                device=f'cuda:{local_rank}'
+            )
+        else:
+            self.unidepth = UniDepth(
+                version=cfg.model.depth.version, 
+                backbone=cfg.model.depth.backbone, 
+                pretrained=True,
+                device='cuda:0'
+            )
         # self.unidepth.image_shape = [cfg.dataset.height, cfg.dataset.width]
         print("Unidepth_v1 loaded!")
         self.set_backproject()

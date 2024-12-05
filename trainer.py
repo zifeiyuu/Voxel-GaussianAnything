@@ -107,16 +107,16 @@ class Trainer(nn.Module):
                 losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss
                 total_loss += big_g_lmbd * big_gauss_reg_loss
 
-            # # regularize too big offset
-            # if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:
-            #     offset = outputs["gauss_offset"]
-            #     big_offset = torch.where(offset**2 > cfg.loss.gauss_offset.thresh**2)
-            #     if len(big_offset[0]) > 0:
-            #         big_offset_reg_loss = torch.mean(offset[big_offset]**2)
-            #     else:
-            #         big_offset_reg_loss = 0.0
-            #     losses["loss/gauss_offset_reg"] = big_offset_reg_loss
-            #     total_loss += offs_lmbd * big_offset_reg_loss
+            # regularize too big offset
+            if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:
+                offset = outputs["gauss_offset"]
+                big_offset = torch.where(offset**2 > cfg.loss.gauss_offset.thresh**2)
+                if len(big_offset[0]) > 0:
+                    big_offset_reg_loss = torch.mean(offset[big_offset]**2)
+                else:
+                    big_offset_reg_loss = 0.0
+                losses["loss/gauss_offset_reg"] = big_offset_reg_loss
+                total_loss += offs_lmbd * big_offset_reg_loss
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):

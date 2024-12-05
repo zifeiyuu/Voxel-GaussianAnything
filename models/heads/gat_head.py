@@ -24,6 +24,11 @@ class LinearHead(nn.Module):
         # linear decoder
         self.gaussian_head = nn.Linear(64, self.num_output_channels)
         self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
+
+        if self.cfg.model.predict_offset:
+            self.offset_head = nn.Linear(64, 3)
+            self.parameters_to_train += [{"params": self.offset_head.parameters()}]
+
         # gaussian parameters initialisation
         start_channel = 0
         for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
@@ -32,30 +37,24 @@ class LinearHead(nn.Module):
             nn.init.constant_(
                 self.gaussian_head.bias[start_channel:start_channel+out_channel], bias)
             start_channel += out_channel
-        # for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
-        #     nn.init.xavier_uniform_(
-        #         self.gaussian_head.weight[start_channel:start_channel+out_channel, :], 1)
-        #     nn.init.constant_(
-        #         self.gaussian_head.bias[start_channel:start_channel+out_channel], 0)
-        #     start_channel += out_channel
-        # for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
-        #     nn.init.xavier_uniform_(
-        #         self.gaussian_head.weight[start_channel:start_channel+out_channel, :], random.randrange(0, 5))
-        #     nn.init.constant_(
-        #         self.gaussian_head.bias[start_channel:start_channel+out_channel], 0)
-        #     start_channel += out_channel  
-        # gaussian parameters activation
+            
         self.gaussian_decoder = GaussianDecoder(cfg)
+        self.parameters_to_train += [{"params": self.gaussian_decoder.parameters()}]
 
     def get_parameter_groups(self):
         return self.parameters_to_train
     
     def forward(self, pts_with_feats):
         gaussian_params = self.gaussian_head(pts_with_feats)
-
         # n is the number of gaussians, d is the dimension of the gaussian parameters
         # we reshape to make flash3d's gaussian decoder happy
         gaussian_params = rearrange(gaussian_params, 'b n d -> b d n')
         out = self.gaussian_decoder(gaussian_params, self.split_dimensions)
+
+        #extra mlp for offset prediction
+        if self.cfg.model.predict_offset:
+            pts_offsets = self.offset_head(pts_with_feats)
+            pts_offsets = rearrange(pts_offsets, 'b (s n) d -> b s d n', s=self.cfg.model.gaussians_per_pixel)
+            out["gauss_offset"] = pts_offsets
 
         return out

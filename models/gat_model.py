@@ -89,17 +89,16 @@ class GATModel(BaseModel):
 
             # predict gaussian parameters for each point
             outputs = self.decoder_gs(torch.cat([pts_feat], dim=-1))
-
-        #offset before normalize? or after normalize
-        if cfg.model.predict_offset:
-            offset = outputs["gauss_offset"]
-            offset = rearrange(pts3d, "b s c n -> b (s n) c", s=cfg.model.gaussians_per_pixel)
-            pts3d = pts3d + offset
-
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         if self.use_decoder_3d and self.normalize_before_decoder_3d:
             # denormalize
             pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
+
+        #offset after normalize
+        if cfg.model.predict_offset:
+            offset = outputs["gauss_offset"]
+            offset = rearrange(offset, "b s c n -> b (s n) c", s=cfg.model.gaussians_per_pixel)
+            pts3d = pts3d + offset
 
         # pts3d_origin = rearrange(pts3d_origin, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         # outputs["gauss_means_origin"] = pts3d_origin

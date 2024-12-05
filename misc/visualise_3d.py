@@ -14,7 +14,7 @@ from misc.depth import normalize_depth_for_display
 from models.encoder.layers import Project3DSimple
 
 from IPython import embed
-
+import time
 def depth_to_img(d):
     d = d.detach().cpu().numpy()
     depth_img = normalize_depth_for_display(d)
@@ -102,58 +102,58 @@ def export_ply(
     path: Path,
 ):
     # Shift the scene so that the median Gaussian is at the origin.
-    means = means - means.median(dim=0).values
+    # means = means - means.median(dim=0).values
 
-    # Rescale the scene so that most Gaussians are within range [-1, 1].
-    scale_factor = means.abs().quantile(0.95, dim=0).max()
-    means = means / scale_factor
-    scales = scales / scale_factor
+    # # Rescale the scene so that most Gaussians are within range [-1, 1].
+    # scale_factor = means.abs().quantile(0.95, dim=0).max()
+    # means = means / scale_factor
+    # scales = scales / scale_factor
 
-    # Define a rotation that makes +Z be the world up vector.
-    rotation = [
-        [0, 0, 1],
-        [-1, 0, 0],
-        [0, -1, 0],
-    ]
-    rotation = torch.tensor(rotation, dtype=torch.float32, device=means.device)
+    # # Define a rotation that makes +Z be the world up vector.
+    # rotation = [
+    #     [0, 0, 1],
+    #     [-1, 0, 0],
+    #     [0, -1, 0],
+    # ]
+    # rotation = torch.tensor(rotation, dtype=torch.float32, device=means.device)
 
-    # The Polycam viewer seems to start at a 45 degree angle. Since we want to be
-    # looking directly at the object, we compose a 45 degree rotation onto the above
-    # rotation.
-    adjustment = torch.tensor(
-        R.from_rotvec([0, 0, -45], True).as_matrix(),
-        dtype=torch.float32,
-        device=means.device,
-    )
-    rotation = adjustment @ rotation
+    # # The Polycam viewer seems to start at a 45 degree angle. Since we want to be
+    # # looking directly at the object, we compose a 45 degree rotation onto the above
+    # # rotation.
+    # adjustment = torch.tensor(
+    #     R.from_rotvec([0, 0, -45], True).as_matrix(),
+    #     dtype=torch.float32,
+    #     device=means.device,
+    # )
+    # rotation = adjustment @ rotation
 
-    # We also want to see the scene in camera space (as the default view). We therefore
-    # compose the w2c rotation onto the above rotation.
-    # rotation = rotation @ extrinsics[:3, :3].inverse()
+    # # We also want to see the scene in camera space (as the default view). We therefore
+    # # compose the w2c rotation onto the above rotation.
+    # # rotation = rotation @ extrinsics[:3, :3].inverse()
 
-    # Apply the rotation to the means (Gaussian positions).
-    means = einsum(rotation, means, "i j, ... j -> ... i")
+    # # Apply the rotation to the means (Gaussian positions).
+    # means = einsum(rotation, means, "i j, ... j -> ... i")
 
-    # Apply the rotation to the Gaussian rotations.
-    rotations = R.from_quat(rotations.detach().cpu().numpy()).as_matrix()
-    rotations = rotation.detach().cpu().numpy() @ rotations
-    rotations = R.from_matrix(rotations).as_quat()
-    x, y, z, w = rearrange(rotations, "g xyzw -> xyzw g")
-    rotations = np.stack((w, x, y, z), axis=-1)
+    # # Apply the rotation to the Gaussian rotations.
+    # rotations = R.from_quat(rotations.detach().cpu().numpy()).as_matrix()
+    # rotations = rotation.detach().cpu().numpy() @ rotations
+    # rotations = R.from_matrix(rotations).as_quat()
+    # x, y, z, w = rearrange(rotations, "g xyzw -> xyzw g")
+    # rotations = np.stack((w, x, y, z), axis=-1)
 
     # Since our axes are swizzled for the spherical harmonics, we only export the DC
     # band.
-    harmonics_view_invariant = harmonics
+    f_dc = harmonics
 
     dtype_full = [(attribute, "f4") for attribute in construct_list_of_attributes(0)]
     elements = np.empty(means.shape[0], dtype=dtype_full)
     attributes = (
         means.detach().cpu().numpy(),
         torch.zeros_like(means).detach().cpu().numpy(),
-        harmonics_view_invariant.detach().cpu().contiguous().numpy(),
+        f_dc.detach().cpu().contiguous().numpy(),
         opacities.detach().cpu().numpy(),
         scales.log().detach().cpu().numpy(),
-        rotations,
+        rotations.detach().cpu().numpy(),
     )
     attributes = np.concatenate(attributes, axis=1)
     elements[:] = list(map(tuple, attributes))
@@ -162,27 +162,46 @@ def export_ply(
 
 
 def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
-    if name == "unidepth":
+    if name == "unidepth":  
         means = rearrange(outputs["gauss_means"], "(b v) c n -> b (v n) c", v=gaussians_per_pixel)[0, :, :3]
         scales = rearrange(outputs["gauss_scaling"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         rotations = rearrange(outputs["gauss_rotation"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         opacities = rearrange(outputs["gauss_opacity"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
+        f_rest = rearrange(outputs["gauss_features_rest"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
+        # means = rearrange(outputs["gauss_means"], "(b v) c n -> (b v) n c", v=gaussians_per_pixel)[1, :, :3]
+        # scales = rearrange(outputs["gauss_scaling"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
+        # rotations = rearrange(outputs["gauss_rotation"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
+        # opacities = rearrange(outputs["gauss_opacity"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
+        # harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
+        # f_rest = rearrange(outputs["gauss_features_rest"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
     elif name == "gat" or name == "rgb_unidepth":
-        embed()
-        # "xyz": rearrange(pos, "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
-        # "opacity": rearrange(outputs["gauss_opacity"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
-        # "scaling": rearrange(outputs["gauss_scaling"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
-        # "rotation": rearrange(outputs["gauss_rotation"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
-        # "features_dc": rearrange(outputs["gauss_features_dc"], "b n c l -> b (n l) 1 c", n=self.cfg.model.gaussians_per_pixel)
         means = rearrange(outputs["gauss_means"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0, :, :3]
-        scales = rearrange(outputs["gauss_scaling"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
+        scales = rearrange(outputs["gauss_scaling"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]*10
         rotations = rearrange(outputs["gauss_rotation"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
         opacities = rearrange(outputs["gauss_opacity"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
-        harmonics = rearrange(outputs["gauss_features_dc"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
+        harmonics = rearrange(outputs["gauss_features_dc"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]    
     else:
         return -1
 
+    # variables = {
+    #     'means': means,
+    #     'scales': scales,
+    #     'rotations': rotations,
+    #     'opacities': opacities,
+    #     'harmonics': harmonics
+    # }
+    # def save_variables_to_txt(variables, path):
+    #     # Create a unique filename with a timestamp
+    #     file_path = f"{str(path.parent)}/{time.time()}.txt"
+        
+    #     with open(file_path, 'w') as file:
+    #         for key, value in variables.items():
+    #             value = value.cpu().numpy()
+    #             file.write(f"{key}:\n")
+    #             np.savetxt(file, value, fmt="%f")
+    #             file.write("\n")
+    # save_variables_to_txt(variables, path)
 
     export_ply(
         means,
@@ -192,22 +211,3 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         opacities,
         path
     )
-
-def save_ply_new(outputs, path, gaussians_per_pixel=3):
-    mkdir_p(os.path.dirname(path))
-
-    xyz = self._xyz.detach().cpu().numpy()
-    normals = np.zeros_like(xyz)
-    f_dc = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-    f_rest = self._features_rest.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-    opacities = self._opacity.detach().cpu().numpy()
-    scale = self._scaling.detach().cpu().numpy()
-    rotation = self._rotation.detach().cpu().numpy()
-
-    dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
-
-    elements = np.empty(xyz.shape[0], dtype=dtype_full)
-    attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
-    elements[:] = list(map(tuple, attributes))
-    el = PlyElement.describe(elements, 'vertex')
-    PlyData([el]).write(path)

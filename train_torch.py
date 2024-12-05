@@ -43,12 +43,13 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
 
         loss_total.backward()  # Backpropagate the scaled loss
 
-        # Gradient clipping
-        max_grad_norm = 0.2  # Set the desired maximum gradient norm
-        if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
-            torch.nn.utils.clip_grad_norm_(trainer.model.module.parameters(), max_grad_norm)
-        else:
-            torch.nn.utils.clip_grad_norm_(trainer.model.parameters(), max_grad_norm)
+        if cfg.optimiser.grad_clip:
+            # Gradient clipping
+            max_grad_norm = cfg.optimiser.max_norm  # Set the desired maximum gradient norm
+            if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
+                torch.nn.utils.clip_grad_norm_(trainer.model.module.parameters(), max_grad_norm)
+            else:
+                torch.nn.utils.clip_grad_norm_(trainer.model.parameters(), max_grad_norm)
 
         # Perform optimization step after every `accumulation_steps`
         if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(train_loader):
@@ -85,7 +86,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         if early_phase or step % cfg.run.val_frequency == 0:
             torch.cuda.empty_cache()
 
-        trainer.step += 1 / accumulation_steps  # Account for fractional steps
+        trainer.step += 1 # Account for fractional steps
         lr_scheduler.step()
 
 
@@ -126,8 +127,6 @@ def main(cfg: DictConfig):
     
     # set up optimiser
     # optimiser = optim.AdamW(model.parameters_to_train, lr=cfg.optimiser.learning_rate, weight_decay=cfg.optimiser.weight_decay) 
-    if cfg.optimiser.grad_clip:
-        torch.nn.utils.clip_grad_norm_(model.parameters_to_train, max_norm=cfg.optimiser.max_norm)
     optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
     num_warmup_steps = cfg.optimiser.num_warmup_steps
     max_training_steps = cfg.optimiser.max_training_steps

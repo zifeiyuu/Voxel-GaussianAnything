@@ -201,7 +201,6 @@ class BaseModel(nn.Module):
                     # use random background for the better opacity learning
                     if cfg.model.randomise_bg_colour and self.is_train():
                         bg_color = torch.rand(3, dtype=dtype, device=device)
-                        # torch.tensor(cfg.model.bg_colour, dtype=dtype, device=device)
                     else:
                         bg_color = torch.tensor(cfg.model.bg_colour, dtype=dtype, device=device)
 

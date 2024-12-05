@@ -21,7 +21,7 @@ max_depth: 20
 gaussians_per_pixel: 1
 gaussian_rendering: true
 randomise_bg_colour: true
-max_sh_degree: 1
+max_sh_degree: 0
 scaled_offset: false
 one_gauss_decoder: false
 predict_offset: false #
