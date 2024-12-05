@@ -37,6 +37,8 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                 inputs[k] = v.to(local_rank, non_blocking=True)
         
         losses, outputs = trainer(inputs)
+        if batch_idx == 0:
+            print(f"Num of gaussian: {outputs['gauss_means'].shape[-1]}")
 
         # Scale losses by accumulation steps
         loss_total = losses["loss/total"] / accumulation_steps

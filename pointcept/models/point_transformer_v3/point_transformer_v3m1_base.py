@@ -25,6 +25,7 @@ from pointcept.models.utils.misc import offset2bincount
 from pointcept.models.utils.structure import Point
 from pointcept.models.modules import PointModule, PointSequential
 
+from IPython import embed
 
 class RPE(torch.nn.Module):
     def __init__(self, patch_size, num_heads):
@@ -380,7 +381,6 @@ class SerializedPooling(PointModule):
         }.issubset(
             point.keys()
         ), "Run point.serialization() point cloud before SerializedPooling"
-
         code = point.serialized_code >> pooling_depth * 3
         code_, cluster, counts = torch.unique(
             code[0],
@@ -431,7 +431,6 @@ class SerializedPooling(PointModule):
             point_dict["condition"] = point.condition
         if "context" in point.keys():
             point_dict["context"] = point.context
-
         if self.traceable:
             point_dict["pooling_inverse"] = cluster
             point_dict["pooling_parent"] = point

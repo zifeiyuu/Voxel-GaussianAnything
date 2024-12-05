@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from IPython import embed
 
 def get_splits_and_inits(cfg):
     split_dimensions = []
@@ -9,16 +10,17 @@ def get_splits_and_inits(cfg):
     bias_inits = []
 
     for g_idx in range(cfg.model.gaussians_per_pixel):
-        if cfg.model.predict_offset:
-            split_dimensions += [3]
-            scale_inits += [cfg.model.xyz_scale]
-            bias_inits += [cfg.model.xyz_bias]
-
         split_dimensions += [1, 3, 4, 3]
-        scale_inits += [cfg.model.opacity_scale, 
-                        cfg.model.scale_scale,
-                        1.0,
-                        5.0]
+        if cfg.model.predict_sh_offset and cfg.model.max_sh_degree == 0:  #predict sh offset in this case, not predict sh
+            scale_inits += [cfg.model.opacity_scale, 
+                            cfg.model.scale_scale,
+                            1.0,
+                            cfg.model.sh_offset_scale]
+        else:
+            scale_inits += [cfg.model.opacity_scale, 
+                            cfg.model.scale_scale,  ### set scale_scale bigger so bigger gaussian initialization
+                            1.0,
+                            cfg.model.sh0_scale]
         bias_inits += [cfg.model.opacity_bias,
                         np.log(cfg.model.scale_bias),
                         0.0,
@@ -35,7 +37,6 @@ def get_splits_and_inits(cfg):
 
     return split_dimensions, scale_inits, bias_inits, 
 
-
 class GaussianDecoder(nn.Module):
     """transfer the predicted features into the gaussian parameters"""
     def __init__(self, cfg):
@@ -48,7 +49,7 @@ class GaussianDecoder(nn.Module):
         self.scaling_lambda = cfg.model.scale_lambda
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x, split_dimensions=[3,1,3,4,3,9]):
+    def forward(self, x, split_dimensions=[1,3,4,3,9]):
         """split the gaussian parameters (default)
         opacity: 1 channel
         scale: 3 channel
@@ -58,7 +59,6 @@ class GaussianDecoder(nn.Module):
         """
         outputs = x.split(split_dimensions, dim=1)
         
-        offset_list = []
         opacity_list = []
         scaling_list = []
         rotation_list = []
@@ -66,14 +66,7 @@ class GaussianDecoder(nn.Module):
         feat_rest_list = []
 
         for i in range(self.cfg.model.gaussians_per_pixel):
-            if self.cfg.model.predict_offset and self.cfg.model.max_sh_degree != 0:
-                offset_s, opacity_s, scaling_s, rotation_s, feat_dc_s, features_rest_s = outputs[i*6:(i+1)*6]
-                offset_list.append(offset_s[:, None, ...])
-                feat_rest_list.append(features_rest_s[:, None, ...])
-            elif self.cfg.model.predict_offset:
-                offset_s, opacity_s, scaling_s, rotation_s, feat_dc_s = outputs[i*5:(i+1)*5]
-                offset_list.append(offset_s[:, None, ...])
-            elif self.cfg.model.max_sh_degree != 0:
+            if self.cfg.model.max_sh_degree != 0:
                 opacity_s, scaling_s, rotation_s, feat_dc_s, features_rest_s = outputs[i*5:(i+1)*5]
                 feat_rest_list.append(features_rest_s[:, None, ...])
             else:
@@ -98,9 +91,6 @@ class GaussianDecoder(nn.Module):
             "gauss_features_dc": feat_dc,
         }
 
-        if self.cfg.model.predict_offset:
-            offset = torch.cat(offset_list, dim=1)
-            out["gauss_offset"] = offset
         if self.cfg.model.max_sh_degree != 0:
             features_rest = torch.cat(feat_rest_list, dim=1)
             out["gauss_features_rest"] = features_rest
@@ -110,31 +100,22 @@ class GaussianDecoder(nn.Module):
 
 
 
-
-
-# import torch
-# import torch.nn as nn
-# import numpy as np
-
-# from IPython import embed
-
 # def get_splits_and_inits(cfg):
 #     split_dimensions = []
 #     scale_inits = []
 #     bias_inits = []
 
 #     for g_idx in range(cfg.model.gaussians_per_pixel):
+#         if cfg.model.predict_offset:
+#             split_dimensions += [3]
+#             scale_inits += [cfg.model.xyz_scale]
+#             bias_inits += [cfg.model.xyz_bias]
+
 #         split_dimensions += [1, 3, 4, 3]
-#         if cfg.model.predict_sh_offset and cfg.model.max_sh_degree == 0:  #predict sh offset in this case, not predict sh
-#             scale_inits += [cfg.model.opacity_scale, 
-#                             cfg.model.scale_scale,
-#                             1.0,
-#                             cfg.model.sh_offset_scale]
-#         else:
-#             scale_inits += [cfg.model.opacity_scale, 
-#                             cfg.model.scale_scale,
-#                             1.0,
-#                             5.0]
+#         scale_inits += [cfg.model.opacity_scale, 
+#                         cfg.model.scale_scale,
+#                         1.0,
+#                         5.0]
 #         bias_inits += [cfg.model.opacity_bias,
 #                         np.log(cfg.model.scale_bias),
 #                         0.0,
@@ -151,6 +132,7 @@ class GaussianDecoder(nn.Module):
 
 #     return split_dimensions, scale_inits, bias_inits, 
 
+
 # class GaussianDecoder(nn.Module):
 #     """transfer the predicted features into the gaussian parameters"""
 #     def __init__(self, cfg):
@@ -163,7 +145,7 @@ class GaussianDecoder(nn.Module):
 #         self.scaling_lambda = cfg.model.scale_lambda
 #         self.sigmoid = nn.Sigmoid()
 
-#     def forward(self, x, split_dimensions=[1,3,4,3,9]):
+#     def forward(self, x, split_dimensions=[3,1,3,4,3,9]):
 #         """split the gaussian parameters (default)
 #         opacity: 1 channel
 #         scale: 3 channel
@@ -173,6 +155,7 @@ class GaussianDecoder(nn.Module):
 #         """
 #         outputs = x.split(split_dimensions, dim=1)
         
+#         offset_list = []
 #         opacity_list = []
 #         scaling_list = []
 #         rotation_list = []
@@ -180,7 +163,14 @@ class GaussianDecoder(nn.Module):
 #         feat_rest_list = []
 
 #         for i in range(self.cfg.model.gaussians_per_pixel):
-#             if self.cfg.model.max_sh_degree != 0:
+#             if self.cfg.model.predict_offset and self.cfg.model.max_sh_degree != 0:
+#                 offset_s, opacity_s, scaling_s, rotation_s, feat_dc_s, features_rest_s = outputs[i*6:(i+1)*6]
+#                 offset_list.append(offset_s[:, None, ...])
+#                 feat_rest_list.append(features_rest_s[:, None, ...])
+#             elif self.cfg.model.predict_offset:
+#                 offset_s, opacity_s, scaling_s, rotation_s, feat_dc_s = outputs[i*5:(i+1)*5]
+#                 offset_list.append(offset_s[:, None, ...])
+#             elif self.cfg.model.max_sh_degree != 0:
 #                 opacity_s, scaling_s, rotation_s, feat_dc_s, features_rest_s = outputs[i*5:(i+1)*5]
 #                 feat_rest_list.append(features_rest_s[:, None, ...])
 #             else:
@@ -205,6 +195,9 @@ class GaussianDecoder(nn.Module):
 #             "gauss_features_dc": feat_dc,
 #         }
 
+#         if self.cfg.model.predict_offset:
+#             offset = torch.cat(offset_list, dim=1)
+#             out["gauss_offset"] = offset
 #         if self.cfg.model.max_sh_degree != 0:
 #             features_rest = torch.cat(feat_rest_list, dim=1)
 #             out["gauss_features_rest"] = features_rest

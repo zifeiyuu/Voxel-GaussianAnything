@@ -10,11 +10,10 @@ from IPython import embed
 import random
 
 class LinearHead(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, in_dim=32):
         super().__init__()
 
         self.cfg = cfg
-        self.in_dim = cfg.model.backbone.pts_feat_dim
 
         self.split_dimensions, scales, biases = get_splits_and_inits(cfg)
         self.num_output_channels = sum(self.split_dimensions)
@@ -22,13 +21,8 @@ class LinearHead(nn.Module):
         self.parameters_to_train = []
 
         # linear decoder
-        self.gaussian_head = nn.Linear(64, self.num_output_channels)
+        self.gaussian_head = nn.Linear(in_dim, self.num_output_channels) ## improved hard code, might be buggy
         self.parameters_to_train += [{"params": self.gaussian_head.parameters()}]
-
-        if self.cfg.model.predict_offset:
-            self.offset_head = nn.Linear(64, 3)
-            self.parameters_to_train += [{"params": self.offset_head.parameters()}]
-
         # gaussian parameters initialisation
         start_channel = 0
         for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
@@ -37,7 +31,17 @@ class LinearHead(nn.Module):
             nn.init.constant_(
                 self.gaussian_head.bias[start_channel:start_channel+out_channel], bias)
             start_channel += out_channel
-            
+
+        if self.cfg.model.predict_offset:
+            # linear offset decoder
+            self.offset_head = nn.Linear(in_dim, 3)
+            self.parameters_to_train += [{"params": self.offset_head.parameters()}]
+            # gaussian parameters initialisation
+            nn.init.xavier_uniform_(
+                self.offset_head.weight[:, :], cfg.model.xyz_scale)
+            nn.init.constant_(
+                self.offset_head.bias[:], cfg.model.xyz_bias)
+
         self.gaussian_decoder = GaussianDecoder(cfg)
         self.parameters_to_train += [{"params": self.gaussian_decoder.parameters()}]
 

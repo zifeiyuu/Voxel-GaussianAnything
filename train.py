@@ -46,7 +46,8 @@ def run_epoch(fabric,
             total_loss = losses["loss/total"]
             trainer.logger.add_scalar('Loss/total', total_loss, trainer.step)
             if cfg.model.gaussian_rendering:
-                trainer.logger.add_scalar('Loss/gaussian_regularization', losses["loss/big_gauss_reg_loss"], trainer.step)
+                trainer.logger.add_scalar('Loss/big_gaussian_regularization', losses["loss/big_gauss_reg_loss"], trainer.step)
+                trainer.logger.add_scalar('Loss/small_gaussian_regularization', losses["loss/small_gauss_reg_loss"], trainer.step)
                 trainer.logger.add_scalar('Loss/reconstruction', losses["loss/rec"], trainer.step) 
 
         optimiser.zero_grad(set_to_none=True)

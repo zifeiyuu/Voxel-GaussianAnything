@@ -76,7 +76,7 @@ class PointSequential_intermediate_output(PointSequential):
     
 class PointTransformerV3Model(nn.Module):
     def __init__(self, in_channels, enable_flash, 
-                enc_dim, output_dim,
+                enc_dim, #output_dim,
                 turn_off_bn, stride,
                 embedding_type='MLP',
                 enc_depths=(2, 2, 2, 6, 2),
@@ -87,21 +87,24 @@ class PointTransformerV3Model(nn.Module):
                 enc_channels=None,
                 pdnorm_bn=False,
                 pdnorm_ln=False,
-                pretrained_ckpt=None
+                pretrained_ckpt=None,
+                delete_decoder_num=0
                 ):
         super(PointTransformerV3Model, self).__init__()
 
-        if dec_channels is None:
-            if output_dim==64:
-                self.dec_channels = (64, 64, 128, 256)
-            elif output_dim==128:
-                self.dec_channels = (128, 128, 256, 256)
-            elif output_dim==96:
-                self.dec_channels = (96, 96, 128, 256)
-            else:
-                raise ValueError("Unsupported output_dim")
-        else:
-            self.dec_channels = dec_channels
+        self.dec_channels = dec_channels
+        self.out_dim = self.dec_channels[0 + delete_decoder_num] ##### set by yourself 
+        # if dec_channels is None:
+        #     if output_dim==64:
+        #         self.dec_channels = (64, 64, 128, 256)
+        #     elif output_dim==128:
+        #         self.dec_channels = (128, 128, 256, 256)
+        #     elif output_dim==96:
+        #         self.dec_channels = (96, 96, 128, 256)
+        #     else:
+        #         raise ValueError("Unsupported output_dim")
+        # else:
+        #     self.dec_channels = dec_channels
 
         if enc_channels is None:
             if enc_dim==32:
@@ -151,8 +154,9 @@ class PointTransformerV3Model(nn.Module):
             pdnorm_adaptive=False,
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"), #This does not matter as pdnorm_bn/ln=False
+            delete_decoder_num=delete_decoder_num
         )
-        self.output_dim = self.dec_channels[0]
+        self.output_dim = self.dec_channels[0] #### not used
 
         if pretrained_ckpt is not None:
             sd = torch.load(pretrained_ckpt,map_location='cpu')['state_dict']
@@ -209,6 +213,7 @@ class PointTransformerV3(PointModule):
         pdnorm_adaptive=False,
         pdnorm_affine=True,
         pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
+        delete_decoder_num=0
     ):
         super().__init__()
         self.num_stages = len(enc_depths)
@@ -221,10 +226,12 @@ class PointTransformerV3(PointModule):
         assert self.num_stages == len(enc_channels)
         assert self.num_stages == len(enc_num_head)
         assert self.num_stages == len(enc_patch_size)
-        assert self.cls_mode or self.num_stages == len(dec_depths) + 1
-        assert self.cls_mode or self.num_stages == len(dec_channels) + 1
-        assert self.cls_mode or self.num_stages == len(dec_num_head) + 1
-        assert self.cls_mode or self.num_stages == len(dec_patch_size) + 1
+        
+        assert delete_decoder_num <= len(dec_depths)
+        # assert self.cls_mode or self.num_stages == len(dec_depths) + 1 # delete x layer of decoder as downsample
+        # assert self.cls_mode or self.num_stages == len(dec_channels) + 1 # delete x layer of decoder as downsample
+        # assert self.cls_mode or self.num_stages == len(dec_num_head) + 1 # delete x layer of decoder as downsample
+        # assert self.cls_mode or self.num_stages == len(dec_patch_size) + 1 # delete x layer of decoder as downsample
             
         # norm layers
         if pdnorm_bn:
@@ -323,7 +330,14 @@ class PointTransformerV3(PointModule):
             ]
             self.dec = PointSequential_intermediate_output()
             dec_channels = list(dec_channels) + [enc_channels[-1]]
-            for s in reversed(range(self.num_stages - 1)):
+
+            ### delete x layers of decoder as downsample
+            decoder_layer_count = 0
+            for s in reversed(range(self.num_stages - 1)): 
+                decoder_layer_count += 1
+                if decoder_layer_count > len(dec_depths) - delete_decoder_num:
+                    break
+
                 dec_drop_path_ = dec_drop_path[
                     sum(dec_depths[:s]) : sum(dec_depths[: s + 1])
                 ]

@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "vis_debug"
+  exp_name: "scale_decoder_debug"
   file: "gat_config.yaml"
 
 data_loader:
@@ -17,7 +17,7 @@ train:
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
   num_gpus: 1 #[1, 2, 3, 4, 5, 6]
-  load_weights_folder: true ####
+  load_weights_folder: false ####
   ema:
     use: true
     update_every: 10
@@ -35,7 +35,7 @@ optimiser:
   warmup_ratio: 2.0
   max_training_steps: 60000
   min_lr_ratio: 0.3
-  grad_clip: true
+  grad_clip: false
   max_norm: 0.2
 
 run:
@@ -44,7 +44,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 1000
+  log_frequency: 500
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5

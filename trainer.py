@@ -96,16 +96,39 @@ class Trainer(nn.Module):
         total_loss = 0.0
 
         if cfg.model.gaussian_rendering:
-            # regularize too big or too small gaussians
-            if (big_g_lmbd := cfg.loss.gauss_scale.weight) > 0:
+            # regularize too big gaussians
+            if (big_g_lmbd := cfg.loss.gauss_max_scale.weight) > 0:
                 scaling = outputs["gauss_scaling"]
-                big_gaussians = torch.where(scaling > cfg.loss.gauss_scale.thresh)
+                big_gaussians = torch.where(scaling > cfg.loss.gauss_max_scale.thresh)
                 if len(big_gaussians[0]) > 0:
                     big_gauss_reg_loss = torch.mean(scaling[big_gaussians])
                 else:
                     big_gauss_reg_loss = 0
                 losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss
                 total_loss += big_g_lmbd * big_gauss_reg_loss
+
+            # regularize too small gaussians
+            if (small_g_lmbd := cfg.loss.gauss_min_scale.weight) > 0:
+                scaling = outputs["gauss_scaling"]
+
+                small_gaussians = torch.where(scaling < cfg.loss.gauss_min_scale.single_thresh)
+                if len(small_gaussians[0]) > 0:
+                    small_gauss_reg_loss = torch.mean(scaling[small_gaussians])
+                else:
+                    small_gauss_reg_loss = 0
+                losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss
+                total_loss += small_g_lmbd * small_gauss_reg_loss
+
+                # mean_thresh_per_channel = cfg.loss.gauss_min_scale.mean_thresh
+                # total_gaussians = scaling.shape[1] * scaling.shape[3] 
+                # # Total threshold for all channels across all Gaussians
+                # total_threshold = (mean_thresh_per_channel * mean_thresh_per_channel) * 3 * total_gaussians
+                # squared_scaling = torch.square(scaling)  # Square each element
+                # sum_squares = torch.sum(squared_scaling, dim=2)  # Sum along the channel dimension
+                # total_scale = torch.sum(sum_squares)
+                # small_gauss_total_reg_loss = torch.relu(total_threshold - total_scale) 
+                # losses["loss/small_gauss_total_reg_loss"] = small_gauss_total_reg_loss
+                # total_loss += small_g_lmbd * small_gauss_total_reg_loss
 
             # regularize too big offset
             if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:

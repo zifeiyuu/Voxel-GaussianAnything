@@ -177,7 +177,7 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         # f_rest = rearrange(outputs["gauss_features_rest"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
     elif name == "gat" or name == "rgb_unidepth":
         means = rearrange(outputs["gauss_means"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0, :, :3]
-        scales = rearrange(outputs["gauss_scaling"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]*10
+        scales = rearrange(outputs["gauss_scaling"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
         rotations = rearrange(outputs["gauss_rotation"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
         opacities = rearrange(outputs["gauss_opacity"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
         harmonics = rearrange(outputs["gauss_features_dc"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]    

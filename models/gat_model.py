@@ -47,14 +47,16 @@ class GATModel(BaseModel):
             self.encoder = Rgb_unidepth_Encoder(cfg)
             
         self.parameters_to_train += self.encoder.get_parameter_groups()
+        head_in_dim = cfg.model.backbone.pts_feat_dim
 
         self.use_decoder_3d = cfg.model.use_decoder_3d
         if self.use_decoder_3d:
             self.normalize_before_decoder_3d = cfg.model.normalize_before_decoder_3d
             self.decoder_3d = PointTransformerDecoder(cfg)
             self.parameters_to_train += self.decoder_3d.get_parameter_groups()
+            head_in_dim = self.decoder_3d.transformer.out_dim
 
-        self.decoder_gs = LinearHead(cfg)
+        self.decoder_gs = LinearHead(cfg, head_in_dim)
         self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
         self.use_checkpoint = False
