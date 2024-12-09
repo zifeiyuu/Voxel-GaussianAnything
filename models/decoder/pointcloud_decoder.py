@@ -47,8 +47,7 @@ class PointTransformerDecoder(nn.Module):
         data_dict["offset"] = offset
 
         if self.version == 'v3':
-            grid_resolution = 384 ###hard code
-            data_dict['grid_coord'] = torch.floor(data_dict['coord']*grid_resolution).int()
+            data_dict['grid_size'] = 0.01
             output = self.transformer(data_dict)
             pts3d = output['coord']
             pts_feat = output['feat']

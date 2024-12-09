@@ -179,7 +179,7 @@ class BaseModel(nn.Module):
                     focals_pixels = torch.diag(K_tgt[b])[:2]
 
                     debug = False
-                    if debug and frame_id == 0 and not self.training:
+                    if debug and frame_id == 0:
                         import numpy as np
                         image = inputs[("color", 0, 0)][b].detach().permute(1, 2, 0).cpu().numpy()
                         image = (image * 255).astype(np.uint8)

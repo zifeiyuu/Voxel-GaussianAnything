@@ -1,12 +1,12 @@
 gauss_max_scale:
   weight: 0.001
-  thresh: 1.0
+  thresh: 2.0
 
 gauss_min_scale:
-  weight: 0.001
-  single_thresh: 0.02
+  weight: 0
+  single_thresh: 0.3
   mean_thresh: 0.2
 
 gauss_offset:
   weight: 0.01
-  thresh: 1.0
+  thresh: 0.8

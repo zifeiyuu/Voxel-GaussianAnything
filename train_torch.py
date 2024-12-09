@@ -78,14 +78,13 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                 else:
                     trainer.model.save_model(optimiser, step, ema)
 
-            if step > 0 and (
-                early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
+            if step != 0 and (early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
                 with torch.no_grad():
                     model_eval = ema if ema is not None else trainer.model
                     trainer.validate(model_eval, evaluator, val_loader, device='cuda')
 
         # Clean up and free GPU memory
-        if early_phase or step % cfg.run.val_frequency == 0:
+        if early_phase or step % cfg.run.val_frequency == 0 or step % 200 == 0:
             torch.cuda.empty_cache()
 
         trainer.step += 1 # Account for fractional steps
