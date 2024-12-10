@@ -26,7 +26,7 @@ enable_flash: True
 enc_dim: 64
 # output_dim: 
 turn_off_bn:  False
-stride: [2,2,2]
+stride: [1,2,2]
 embedding_type: 'MLP'
 enc_depths: [2, 2, 6, 2]
 enc_num_head: [2, 4, 8, 16]
@@ -38,4 +38,4 @@ pdnorm_bn: False
 pdnorm_ln: False
 pretrained_ckpt: 
 
-delete_decoder_num: 1 ###### output_dim now depends on how many layers of decoder you want to delete
+delete_decoder_num: 0 ###### output_dim now depends on how many layers of decoder you want to delete

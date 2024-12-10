@@ -1,12 +1,12 @@
 defaults:
   - _self_
   - hydra: defaults
-  - model: rgb_unidepth_model #gat_model rgb_unidepth_model
+  - model: new_gat_model 
   - dataset: pixelsplat # pixelsplat scannetpp
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "offset+downsample_init"
+  exp_name: "pre_downsample_debug"
   file: "gat_config.yaml"
 
 data_loader:

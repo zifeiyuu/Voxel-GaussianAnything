@@ -9,6 +9,7 @@ from einops import rearrange
 from .encoder.layers import BackprojectDepth
 from .encoder.dust3r_encoder import Dust3rEncoder
 from .encoder.rgb_unidepth_encoder import Rgb_unidepth_Encoder
+from .encoder.moge_encoder import MoGe_Encoder
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from .base_model import BaseModel
 from .heads.gat_head import LinearHead
@@ -21,6 +22,7 @@ from IPython import embed
 from models.decoder.resnet_decoder import ResnetDecoder
 
 from torch.utils.checkpoint import checkpoint
+from torch_scatter import scatter_mean
 
 def default_param_group(model):
     return [{'params': model.parameters()}]
@@ -45,6 +47,8 @@ class GATModel(BaseModel):
             self.encoder = Dust3rEncoder(cfg)
         elif "unidepth" in cfg.model.backbone.name:
             self.encoder = Rgb_unidepth_Encoder(cfg)
+        elif "moge" in cfg.model.backbone.name:
+            self.encoder = MoGe_Encoder(cfg)
             
         self.parameters_to_train += self.encoder.get_parameter_groups()
         head_in_dim = cfg.model.backbone.pts_feat_dim
@@ -69,6 +73,9 @@ class GATModel(BaseModel):
         # we do not use unprojection, so as camera intrinsics
 
         pts3d_origin, pts_feat, pts_rgb = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
+
+        if cfg.model.pre_downsample:
+            pts3d_origin, pts_feat, pts_rgb = points_to_voxels(pts3d_origin, pts_feat, pts_rgb, cfg.model.voxel_size)
 
         if self.use_decoder_3d:
             if self.normalize_before_decoder_3d:
@@ -113,3 +120,35 @@ class GATModel(BaseModel):
 
         return outputs
 
+
+def points_to_voxels(pts3d_origin, pts_feat, pts_rgb, voxel_size):
+    B, N, _ = pts3d_origin.shape
+    feature_dim = pts_feat.shape[2]
+    voxel_xyz, voxel_features, voxel_colors = [], [], []
+
+    for b in range(B):
+        # Quantize points into voxel indices
+        voxel_indices = (pts3d_origin[b] / voxel_size).floor().long()
+        aggregated_xyz, inverse_indices = torch.unique(voxel_indices, dim=0, return_inverse=True)
+        
+        # Aggregate features and colors separately
+        aggregated_features = scatter_mean(pts_feat[b], inverse_indices, dim=0)
+        aggregated_colors = scatter_mean(pts_rgb[b], inverse_indices, dim=0)
+
+        voxel_xyz.append(aggregated_xyz)
+        voxel_features.append(aggregated_features)
+        voxel_colors.append(aggregated_colors)
+
+    # Stack results
+    max_voxels = max(loc.shape[0] for loc in voxel_xyz)
+    padded_xyz = torch.zeros(B, max_voxels, 3, dtype=torch.long)
+    padded_features = torch.zeros(B, max_voxels, feature_dim)
+    padded_colors = torch.zeros(B, max_voxels, 3)
+
+    for b in range(B):
+        M = voxel_xyz[b].shape[0]
+        padded_xyz[b, :M] = voxel_xyz[b]
+        padded_features[b, :M] = voxel_features[b]
+        padded_colors[b, :M] = voxel_colors[b]
+
+    return padded_xyz.float().to(pts3d_origin.device), padded_features.to(pts_feat.device), padded_colors.to(pts_rgb.device)

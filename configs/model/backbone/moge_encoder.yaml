@@ -1,0 +1,9 @@
+name: moge
+
+pts_feat_dim: 32
+
+moge:
+  freeze_encoder: true
+  freeze_decoder: true
+
+
