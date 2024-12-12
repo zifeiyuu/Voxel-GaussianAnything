@@ -125,7 +125,7 @@ class MoGe_Encoder(nn.Module):
 
         #fill the inf depth with a desgined value
         max_depth = pts_depth[torch.isfinite(pts_depth)].max().item()  # Get the maximum valid depth
-        pts_depth = pts_depth.masked_fill(~mask.bool(), 2 * max_depth)
+        pts_depth = pts_depth.masked_fill(~mask.bool(), 1 + max_depth)
 
         # vit encoder to get per-image features
         # Encode

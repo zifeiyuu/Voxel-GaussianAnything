@@ -38,20 +38,16 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         
         losses, outputs = trainer(inputs)
 
-        #Avoid accident crash?
-        if trainer.model.module.use_decoder_3d and trainer.model.module.decoder_3d.transformer.backbone.skip:
-            print(f"Skipping iteration: batch_idx = {batch_idx}, transformer serialization depth exceeds the limit (16)")
-            trainer.step += 1
-            lr_scheduler.step()
-            del inputs, losses, outputs  # Free references to tensors
-            torch.cuda.empty_cache()
-            continue
-
         if batch_idx == 0:
             print(f"Num of gaussian: {outputs['gauss_means'].shape[-1]}")
 
-        # Scale losses by accumulation steps
-        loss_total = losses["loss/total"] / accumulation_steps
+        if not (trainer.model.module.use_decoder_3d and trainer.model.module.decoder_3d.transformer.backbone.skip):
+            # Scale losses by accumulation steps
+            loss_total = losses["loss/total"] / accumulation_steps            
+        else:
+            # skip this iter, avoid crash
+            print(f"Masking gradients: batch_idx = {batch_idx}, transformer serialization depth exceeds the limit (16)")
+            loss_total = torch.tensor(0.0, device=local_rank)  # Set loss to zero
 
         loss_total.backward()  # Backpropagate the scaled loss
 
