@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "pre_downsample_debug"
+  exp_name: "moge_sanity"
   file: "gat_config.yaml"
 
 data_loader:

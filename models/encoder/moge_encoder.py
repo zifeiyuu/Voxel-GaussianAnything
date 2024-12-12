@@ -17,6 +17,8 @@ from .layers import BackprojectDepth
 
 import torch.distributed as dist
 import math
+import cv2
+import time
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 moge_path = os.path.join(base_dir, 'submodules/MoGe')
@@ -118,6 +120,8 @@ class MoGe_Encoder(nn.Module):
 
         pts_depth = predictions['depth']  #(B C) H W
         pts_depth = rearrange(pts_depth, '(b c) h w -> b (h w) c', b=B) #B (H W) C
+        mask = predictions['mask']  #(B C) H W
+        mask = rearrange(mask, '(b c) h w -> b (h w) c', b=B) #B (H W) C
 
         # vit encoder to get per-image features
         # Encode
@@ -146,5 +150,18 @@ class MoGe_Encoder(nn.Module):
 
         #directly give decoder rgb information for each 3d point
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
+
+        if torch.count_nonzero(mask).item() != H*W:
+            D = self.pts_feat_dim
+
+            # image = inputs[("color", 0, 0)][0].detach().permute(1, 2, 0).cpu().numpy()
+            # image = (image * 255).astype(np.uint8)
+            # cv2.imwrite(f"/mnt/ziyuxiao/code/GaussianAnything/output/debug/{time.time()}.png", image)
+
+            # Apply mask directly
+            with torch.no_grad():
+                pts_feat = pts_feat[mask.expand(-1, -1, D)].view(B, -1, D)
+                pts3d = pts3d[mask.expand(-1, -1, 3)].view(B, -1, 3)
+                pts_rgb = pts_rgb[mask.expand(-1, -1, 3)].view(B, -1, 3)
 
         return pts3d, pts_feat, pts_rgb
