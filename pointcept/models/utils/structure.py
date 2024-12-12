@@ -71,7 +71,11 @@ class Point(Dict):
         # Although depth is limited to less than 16, we can encode a 655.36^3 (2^16 * 0.01) meter^3
         # cube with a grid size of 0.01 meter. We consider it is enough for the current stage.
         # We can unlock the limitation by optimizing the z-order encoding function if necessary.
-        assert depth <= 16
+
+        self["skip"] = True if (depth > 16) else False
+        if (depth > 16):
+            depth = 16
+        # assert depth <= 16
 
         # The serialization codes are arranged as following structures:
         # [Order1 ([n]),

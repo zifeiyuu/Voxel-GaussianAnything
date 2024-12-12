@@ -37,6 +37,16 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                 inputs[k] = v.to(local_rank, non_blocking=True)
         
         losses, outputs = trainer(inputs)
+
+        #Avoid accident crash?
+        if trainer.model.module.use_decoder_3d and trainer.model.module.decoder_3d.transformer.backbone.skip:
+            print(f"Skipping iteration: batch_idx = {batch_idx}, transformer serialization depth exceeds the limit (16)")
+            trainer.step += 1
+            lr_scheduler.step()
+            del inputs, losses, outputs  # Free references to tensors
+            torch.cuda.empty_cache()
+            continue
+
         if batch_idx == 0:
             print(f"Num of gaussian: {outputs['gauss_means'].shape[-1]}")
 
