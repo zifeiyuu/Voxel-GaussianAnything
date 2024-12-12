@@ -51,7 +51,7 @@ class GATModel(BaseModel):
             self.encoder = MoGe_Encoder(cfg)
             
         self.parameters_to_train += self.encoder.get_parameter_groups()
-        head_in_dim = cfg.model.backbone.pts_feat_dim
+        head_in_dim = [cfg.model.backbone.pts_feat_dim]
 
         self.use_decoder_3d = cfg.model.use_decoder_3d
         if self.use_decoder_3d:
@@ -87,17 +87,19 @@ class GATModel(BaseModel):
                 pts3d = pts3d_origin
 
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
+            pts3d = torch.cat(pts3d, dim=1)
 
             # predict gaussian parameters for each point
-            outputs = self.decoder_gs(torch.cat([pts_feat], dim=-1))
+            outputs = self.decoder_gs(pts_feat)
         else:
             mean = pts3d_origin.mean(dim=1, keepdim=True) # (B, 1, 3)
             z_median = torch.median(pts3d_origin[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
             pts3d_normed = (pts3d_origin - mean) / (z_median + 1e-6) # (B, N, 3)
-            pts3d = pts3d_origin
+            pts3d = [pts3d_origin]
 
             # predict gaussian parameters for each point
-            outputs = self.decoder_gs(torch.cat([pts_feat], dim=-1))
+            outputs = self.decoder_gs([pts_feat])
+
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         if self.use_decoder_3d and self.normalize_before_decoder_3d:
             # denormalize

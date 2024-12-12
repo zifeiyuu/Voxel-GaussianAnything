@@ -88,12 +88,17 @@ class PointTransformerV3Model(nn.Module):
                 pdnorm_bn=False,
                 pdnorm_ln=False,
                 pretrained_ckpt=None,
-                delete_decoder_num=0
+                delete_decoder_num=0,
+                all_layer_output=False
                 ):
         super(PointTransformerV3Model, self).__init__()
 
         self.dec_channels = dec_channels
-        self.out_dim = self.dec_channels[0 + delete_decoder_num] ##### set by yourself 
+        if all_layer_output:
+            self.out_dim = [enc_channels[-1]] + self.dec_channels[delete_decoder_num :][::-1] ##### set by yourself 
+        else:
+            self.out_dim = [self.dec_channels[delete_decoder_num]]
+
         # if dec_channels is None:
         #     if output_dim==64:
         #         self.dec_channels = (64, 64, 128, 256)
@@ -154,7 +159,8 @@ class PointTransformerV3Model(nn.Module):
             pdnorm_adaptive=False,
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"), #This does not matter as pdnorm_bn/ln=False
-            delete_decoder_num=delete_decoder_num
+            delete_decoder_num=delete_decoder_num,
+            all_layer_output=all_layer_output
         )
         self.output_dim = self.dec_channels[0] #### not used
 
@@ -213,7 +219,8 @@ class PointTransformerV3(PointModule):
         pdnorm_adaptive=False,
         pdnorm_affine=True,
         pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
-        delete_decoder_num=0
+        delete_decoder_num=0,
+        all_layer_output=False
     ):
         super().__init__()
         self.num_stages = len(enc_depths)
@@ -232,6 +239,7 @@ class PointTransformerV3(PointModule):
         # assert self.cls_mode or self.num_stages == len(dec_channels) + 1 # delete x layer of decoder as downsample
         # assert self.cls_mode or self.num_stages == len(dec_num_head) + 1 # delete x layer of decoder as downsample
         # assert self.cls_mode or self.num_stages == len(dec_patch_size) + 1 # delete x layer of decoder as downsample
+        self.all_layer_output = all_layer_output
             
         # norm layers
         if pdnorm_bn:
@@ -385,12 +393,28 @@ class PointTransformerV3(PointModule):
         point.sparsify()
         point = self.embedding(point)
         point = self.enc(point)
+
+        coords_outputs = []
+        feats_outputs = []
+
         if not self.cls_mode:
-            point, multiscale_point = self.dec(point)
+            if self.all_layer_output:
+                coords_outputs.append(point['coord'].clone())
+                feats_outputs.append(point['feat'].clone()) 
+                for i, module in enumerate(self.dec):
+                    point = module(point)  # Process the point object through the module
+                    coords_outputs.append(point['coord'].clone())  # Extract and clone 'coord'
+                    feats_outputs.append(point['feat'].clone()) 
+            else:
+                point, multiscale_point = self.dec(point)
+                coords_outputs.append(point['coord'].clone())  # Extract and clone 'coord'
+                feats_outputs.append(point['feat'].clone()) 
         # else:
         #     point.feat = torch_scatter.segment_csr(
         #         src=point.feat,
         #         indptr=nn.functional.pad(point.offset, (1, 0)),
         #         reduce="mean",
         #     )
-        return point
+        # List to store intermediate outputs
+
+        return coords_outputs, feats_outputs

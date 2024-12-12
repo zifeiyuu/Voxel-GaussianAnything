@@ -123,6 +123,10 @@ class MoGe_Encoder(nn.Module):
         mask = predictions['mask']  #(B C) H W
         mask = rearrange(mask, '(b c) h w -> b (h w) c', b=B) #B (H W) C
 
+        #fill the inf depth with a desgined value
+        max_depth = pts_depth[torch.isfinite(pts_depth)].max().item()  # Get the maximum valid depth
+        pts_depth = pts_depth.masked_fill(~mask.bool(), 2 * max_depth)
+
         # vit encoder to get per-image features
         # Encode
         encoder_outputs = self.moge.features[-1][0] #last layer of transformer     (B X D)   I DON'T KNOW WHAT DOES X MEANS????
@@ -151,17 +155,13 @@ class MoGe_Encoder(nn.Module):
         #directly give decoder rgb information for each 3d point
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
 
-        if torch.count_nonzero(mask).item() != H*W:
-            D = self.pts_feat_dim
-
-            # image = inputs[("color", 0, 0)][0].detach().permute(1, 2, 0).cpu().numpy()
-            # image = (image * 255).astype(np.uint8)
-            # cv2.imwrite(f"/mnt/ziyuxiao/code/GaussianAnything/output/debug/{time.time()}.png", image)
-
-            # Apply mask directly
-            with torch.no_grad():
-                pts_feat = pts_feat[mask.expand(-1, -1, D)].view(B, -1, D)
-                pts3d = pts3d[mask.expand(-1, -1, 3)].view(B, -1, 3)
-                pts_rgb = pts_rgb[mask.expand(-1, -1, 3)].view(B, -1, 3)
+        # # mask out invalid points
+        # if torch.count_nonzero(mask).item() != H*W:
+        #     D = self.pts_feat_dim
+        #     # Apply mask directly
+        #     with torch.no_grad():
+        #         pts_feat = pts_feat[mask.expand(-1, -1, D)].view(B, -1, D)
+        #         pts3d = pts3d[mask.expand(-1, -1, 3)].view(B, -1, 3)
+        #         pts_rgb = pts_rgb[mask.expand(-1, -1, 3)].view(B, -1, 3)
 
         return pts3d, pts_feat, pts_rgb

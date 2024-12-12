@@ -130,8 +130,6 @@ class BaseModel(nn.Module):
         if self.predict_sh_offset and cfg.model.max_sh_degree == 0:
             inputs_sh = self.rgb_to_sh0(inputs["color_aug", 0, 0])
             inputs_sh = rearrange(inputs_sh, "b c h w -> b c (h w)").unsqueeze(1)
-            if cfg.model.expand_pts:
-                inputs_sh = torch.cat([inputs_sh, inputs_sh], dim=-1)
             outputs["gauss_features_dc"] = outputs["gauss_features_dc"] + inputs_sh
 
         for scale in [0]: #cfg.model.scales:

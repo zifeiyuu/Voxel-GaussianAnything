@@ -27,12 +27,6 @@ class PointTransformerDecoder(nn.Module):
             self.transformer = PointTransformerV2_x(**kw)
         self.parameters_to_train = [{"params": list(self.transformer.parameters())}]
 
-        if self.cfg.model.expand_pts:
-            original_num_pts = (self.cfg.dataset.height + self.cfg.dataset.pad_border_aug * 2) * (self.cfg.dataset.width +  + self.cfg.dataset.pad_border_aug * 2)
-            duplicates = 2
-            self.expander = nn.Linear(3 + 64, 3 + 64)
-            self.parameters_to_train = [{"params": list(self.expander.parameters())}]
-
     def forward(self, pts3d, pts_feat):
         # pts3d: (B, N, 3)
         # pts_feat: (B, N, C)
@@ -48,24 +42,27 @@ class PointTransformerDecoder(nn.Module):
 
         if self.version == 'v3':
             data_dict['grid_size'] = 0.01
-            output = self.transformer(data_dict)
-            pts3d = output['coord']
-            pts_feat = output['feat']
+            coords, feats = self.transformer(data_dict)
+            pts3d_list = []
+            pts_feat_list = []
+
+            for pts3d, pts_feat in zip(coords, feats):
+                # Reshape and add to lists
+                pts3d = rearrange(pts3d, "(B N) C -> B N C", B=B)
+                pts_feat = rearrange(pts_feat, "(B N) C -> B N C", B=B)
+
+                pts3d_list.append(pts3d)
+                pts_feat_list.append(pts_feat)
+
+            return pts3d_list, pts_feat_list
+        
         else:
         # forward through PointTransformer
             pts3d, pts_feat, offsets = self.transformer(data_dict)
-
-        if self.cfg.model.expand_pts:
-            pts_offsets = torch.cat([pts3d, pts_feat], dim = -1)
-            pts_offsets = self.expander(pts_offsets)
-            pts3d = torch.cat([pts3d, pts3d + pts_offsets[:, :3]], dim=0)
-            pts_feat = torch.cat([pts_feat, pts_feat + pts_offsets[:, 3:]], dim=0)
-
-        # unflatten B and N dimensions, note that N may change after PointTransformer
-        pts3d = rearrange(pts3d, "(B N) C -> B N C", B=B)
-        pts_feat = rearrange(pts_feat, "(B N) C -> B N C", B=B)
-        
-        return pts3d, pts_feat
+            # unflatten B and N dimensions, note that N may change after PointTransformer
+            pts3d = rearrange(pts3d, "(B N) C -> B N C", B=B)
+            pts_feat = rearrange(pts_feat, "(B N) C -> B N C", B=B)
+            return pts3d, pts_feat
 
     def get_parameter_groups(self):
         return self.parameters_to_train
