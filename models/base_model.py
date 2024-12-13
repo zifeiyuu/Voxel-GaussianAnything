@@ -17,6 +17,9 @@ import scipy
 
 from submodules.extra import project_point_cloud_to_depth_map, save_point_cloud_with_plyfile
 
+def minmax(data):
+    return (data - data.min()) / (data.max() - data.min())
+
 def default_param_group(model):
     return [{'params': model.parameters()}]
 
