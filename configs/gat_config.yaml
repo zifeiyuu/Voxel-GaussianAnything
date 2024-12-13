@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "moge_sanity2"
+  exp_name: "moge_origin"
   file: "gat_config.yaml"
 
 data_loader:

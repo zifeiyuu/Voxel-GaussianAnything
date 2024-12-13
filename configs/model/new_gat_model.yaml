@@ -39,11 +39,11 @@ depth_scale: 0.1 # 1.0
 xyz_scale: 1e-02 # 1e-02
 opacity_scale: 1e-3 # 1.0 1e-3
 scale_scale: 1e-1 # 1e-1
-sh0_scale: 1
+sh0_scale: 3
 sh_scale: 1.0
 
 scale_lambda: 0.01
 depth_bias: -0.1
 xyz_bias: 0.0
-opacity_bias: 0.1
-scale_bias: 0.04
+opacity_bias: 0.0
+scale_bias: 0.02

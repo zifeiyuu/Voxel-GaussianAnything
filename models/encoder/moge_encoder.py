@@ -24,6 +24,8 @@ base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 moge_path = os.path.join(base_dir, 'submodules/MoGe')
 sys.path.insert(0, moge_path)
 from moge.model import MoGeModel
+from moge.utils.geometry_torch import normalized_view_plane_uv, recover_focal_shift
+import utils3d
 sys.path.pop(0)
 
 class MoGe_Encoder(nn.Module):
@@ -115,37 +117,73 @@ class MoGe_Encoder(nn.Module):
             gt_K = gt_K.unsqueeze(0)
         B, C, H, W = rgbs.shape      
 
-        # Infer 
-        predictions = self.moge.infer(rgbs)
+        raw_img_h, raw_img_w = rgbs.shape[-2:]
+        aspect_ratio = raw_img_w / raw_img_h
 
-        pts_depth = predictions['depth']  #(B C) H W
-        pts_depth = rearrange(pts_depth, '(b c) h w -> b (h w) c', b=B) #B (H W) C
-        mask = predictions['mask']  #(B C) H W
+        patch_h, patch_w = raw_img_h // 14, raw_img_w // 14
+
+        rgbs = (rgbs - self.moge.image_mean) / self.moge.image_std
+
+        # Apply image transformation for DINOv2
+        image_14 = F.interpolate(rgbs, (patch_h * 14, patch_w * 14), mode="bilinear", align_corners=False, antialias=True)
+
+        # Get intermediate layers from the backbone
+        mixed_precision = False
+        with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=mixed_precision):
+            features = self.moge.backbone.get_intermediate_layers(image_14, self.moge.intermediate_layers, return_class_token=True)
+
+        # Predict points (and mask)
+        output = self.moge.head(features, rgbs)
+        if self.moge.split_head:
+            points, mask = output
+        else:
+            points, mask = output.split([3, 1], dim=1)
+        points, mask = points.permute(0, 2, 3, 1), mask.squeeze(1)
+
+        if self.moge.remap_output == 'linear' or self.moge.remap_output == False:
+            pass
+        elif self.moge.remap_output =='sinh' or self.moge.remap_output == True:
+            points = torch.sinh(points)
+        elif self.moge.remap_output == 'exp':
+            xy, z = points.split([2, 1], dim=-1)
+            z = torch.exp(z)
+            points = torch.cat([xy * z, z], dim=-1)
+        elif self.moge.remap_output =='sinh_exp':
+            xy, z = points.split([2, 1], dim=-1)
+            points = torch.cat([torch.sinh(xy), torch.exp(z)], dim=-1)
+        else:
+            raise ValueError(f"Invalid remap output type: {self.moge.remap_output}")
+
+        # Get camera-space point map. (Focal here is the focal length relative to half the image diagonal)
+        focal, shift = recover_focal_shift(points, None if mask is None else mask > 0.5)
+        fx = focal / 2 * (1 + aspect_ratio ** 2) ** 0.5 / aspect_ratio
+        fy = focal / 2 * (1 + aspect_ratio ** 2) ** 0.5 
+        depth = points[..., 2] + shift[..., None, None]
+
+        #apply mask
+        # mask_binary = (depth > 0) & (mask > 0.5)
+        # depth = torch.where(mask_binary, depth, torch.inf)
+
+        mask = mask > 0.5  #(B C) H W
+
+        pts_depth = rearrange(depth, '(b c) h w -> b (h w) c', b=B) #B (H W) C
         mask = rearrange(mask, '(b c) h w -> b (h w) c', b=B) #B (H W) C
 
         #fill the inf depth with a desgined value
-        max_depth = pts_depth[torch.isfinite(pts_depth)].max().item()  # Get the maximum valid depth
-        pts_depth = pts_depth.masked_fill(~mask.bool(), 1 + max_depth)
+        # max_depth = pts_depth[torch.isfinite(pts_depth)].max().item()  # Get the maximum valid depth
+        # pts_depth = pts_depth.masked_fill(~mask.bool(), 1 + max_depth)
+
+        # scale depth map smaller to avoid bug
+        pts_depth = pts_depth * 0.6
 
         # vit encoder to get per-image features
         # Encode
-        encoder_outputs = self.moge.features[-1][0] #last layer of transformer     (B X D)   I DON'T KNOW WHAT DOES X MEANS????
-        feat_num = encoder_outputs.shape[1]
-
-        # Find closest dimensions  TRICKY APPROACH.
-        for i in range(int(math.sqrt(feat_num)), 0, -1):
-            if feat_num % i == 0:
-                hx, wx = i, feat_num // i
-                break
-        # Reshape to add spatial dimensions
-        encoder_outputs = rearrange(encoder_outputs, 'b (hx wx) e-> b hx wx e', hx=hx, wx=wx)  
-        # Downsample using F.interpolate
-        encoder_outputs = encoder_outputs.permute(0, 3, 1, 2)
-        encoder_outputs = F.interpolate(encoder_outputs, size=(int(H / self.patch_size), int(W / self.patch_size)), mode='bilinear') 
-        encoder_outputs = encoder_outputs.permute(0, 2, 3, 1) # B, H/P, W/P, EMBED_DIM
-
-        pts_feat = self.pts_feat_head(encoder_outputs)  # (B, H / P, W / P, EMBED_DIM) ->(B, H / P, W / P, p^2*D)
-        pts_feat = rearrange(pts_feat, 'b hp wp (p d) -> b (hp wp p) d', p=self.patch_size**2, d=self.pts_feat_dim)               
+        encoder_outputs = features[-1][0] #last layer of transformer    
+        cls_token =  features[-1][1]
+        encoder_outputs = (encoder_outputs + cls_token.unsqueeze(1)).contiguous()
+        
+        pts_feat = self.pts_feat_head(encoder_outputs)  # (B, H / P * W / P, EMBED_DIM) ->(B, H / P * W / P, p^2*D)
+        pts_feat = rearrange(pts_feat, 'b hpwp (p d) -> b (hpwp p) d', p=self.patch_size**2, d=self.pts_feat_dim)               
         
         # back project depth to world splace
         scale = self.cfg.model.scales[0]

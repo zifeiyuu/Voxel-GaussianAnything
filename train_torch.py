@@ -47,7 +47,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         else:
             # skip this iter, avoid crash
             print(f"Masking gradients: batch_idx = {batch_idx}, transformer serialization depth exceeds the limit (16)")
-            loss_total = torch.tensor(0.0, device=local_rank)  # Set loss to zero
+            loss_total = torch.tensor(0.0, device=local_rank, requires_grad=True)   # Set loss to zero
 
         loss_total.backward()  # Backpropagate the scaled loss
 
