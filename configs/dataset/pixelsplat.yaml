@@ -25,7 +25,7 @@ normalize: false
 subset: -1  # use subset frames for small set overfitting
 
 frame_sampling_method: random
-scale_pose_by_depth: false
+scale_pose_by_depth: true
 test_split: mine
 
 #new

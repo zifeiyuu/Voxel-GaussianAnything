@@ -332,12 +332,13 @@ class scannetppDataset(Dataset):
             elif self.cfg.dataset.frame_sampling_method  == "random":
                 target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
                 src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]                
+            frame_names = [0] + self.novel_frames  
         else:
             seq_key, period_idx, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
             pose_data = self._pose_data[seq_key][period_idx]
+            total_frame_num = len(src_and_tgt_frame_idxs)
+            frame_names = list(range(total_frame_num))
 
-        total_frame_num = len(src_and_tgt_frame_idxs)
-        frame_names = list(range(total_frame_num))
         have_depth = seq_key not in self._missing_scans
 
         inputs = {}

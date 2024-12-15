@@ -241,6 +241,7 @@ class Rgb_unidepth_Encoder(nn.Module):
 
         #directly give decoder rgb information for each 3d point
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
+        pts_depth = rearrange(pts_depth, 'b (h w) c -> b c h w', h=H, w=W) #B (H W) C
         
         
-        return pts3d, pts_feat, pts_rgb
+        return pts3d, pts_feat, pts_rgb, pts_depth

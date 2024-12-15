@@ -174,7 +174,7 @@ class MoGe_Encoder(nn.Module):
         # pts_depth = pts_depth.masked_fill(~mask.bool(), 1 + max_depth)
 
         # scale depth map smaller to avoid bug
-        pts_depth = pts_depth * 0.5
+        pts_depth = pts_depth * 1
 
         # vit encoder to get per-image features
         # Encode
@@ -192,7 +192,7 @@ class MoGe_Encoder(nn.Module):
 
         #directly give decoder rgb information for each 3d point
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
-
+        pts_depth = rearrange(pts_depth, 'b (h w) c -> b c h w', h=H, w=W) #B (H W) C
         # # mask out invalid points
         # if torch.count_nonzero(mask).item() != H*W:
         #     D = self.pts_feat_dim
@@ -202,4 +202,4 @@ class MoGe_Encoder(nn.Module):
         #         pts3d = pts3d[mask.expand(-1, -1, 3)].view(B, -1, 3)
         #         pts_rgb = pts_rgb[mask.expand(-1, -1, 3)].view(B, -1, 3)
 
-        return pts3d, pts_feat, pts_rgb
+        return pts3d, pts_feat, pts_rgb, pts_depth

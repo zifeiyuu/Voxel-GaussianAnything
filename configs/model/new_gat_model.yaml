@@ -1,6 +1,6 @@
 defaults:
   - depth: unidepth
-  - backbone: rgb_unidepth_encoder  # rgb_unidepth_encoder  moge_encoder
+  - backbone: moge_encoder  # rgb_unidepth_encoder  moge_encoder
   - decoder_3d: v3_debug  # PT_decoder_debug v3_debug
 
 name: rgb_unidepth
@@ -13,7 +13,7 @@ voxel_size: 0.05
 
 use_decoder_3d: true
 normalize_before_decoder_3d: true
-grid_size: 0.001
+grid_size: 0.01
 
 version: v3
 

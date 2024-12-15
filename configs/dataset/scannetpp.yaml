@@ -9,8 +9,8 @@ ransac_on_the_fly: false
 train_split_path: ['nvs_sem_train.txt', 'nvs_sem_val.txt']
 test_split_path: ['mini_test.txt'] # 'nvs_test.txt'
 
-height: 256 #256 448 384 [462, 616]
-width: 384 #384 672 608
+height: 224 #256 448 384 [462, 616]
+width: 336 #384 672 608
 
 original_width: 920.0 #1752 
 original_height: 690.0 #1168
