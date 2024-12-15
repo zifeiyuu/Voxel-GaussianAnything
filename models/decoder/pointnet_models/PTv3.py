@@ -98,6 +98,7 @@ class PointTransformerV3Model(nn.Module):
             self.out_dim = [enc_channels[-1]] + self.dec_channels[delete_decoder_num :][::-1] ##### set by yourself 
         else:
             self.out_dim = [self.dec_channels[delete_decoder_num]]
+        self.skip = False
 
         # if dec_channels is None:
         #     if output_dim==64:

@@ -2,7 +2,7 @@
 
 # in_channels: 35
 # enable_flash: True
-# # output_dim: 
+# # output_dim: 64
 # enc_dim: 64
 # turn_off_bn: False
 # stride: [1,2]
@@ -18,6 +18,8 @@
 # pretrained_ckpt: 
 
 # delete_decoder_num: 0 ###### output_dim now depends on how many layers of decoder you want to delete
+# all_layer_output: false
+
 
 name: v3_debug
 

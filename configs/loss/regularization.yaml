@@ -1,6 +1,6 @@
 gauss_max_scale:
   weight: 0.001
-  thresh: 4.0
+  thresh: 2.0
 
 gauss_min_scale:
   weight: 0

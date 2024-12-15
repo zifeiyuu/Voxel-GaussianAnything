@@ -216,7 +216,7 @@ class BaseModel(nn.Module):
                         bg_color,
                         cfg.model.max_sh_degree
                     )
-                    rgb = out["render"].clamp(0, 1)
+                    rgb = out["render"]
                     rgbs.append(rgb)
                     if "depth" in out:
                         depths.append(out["depth"])

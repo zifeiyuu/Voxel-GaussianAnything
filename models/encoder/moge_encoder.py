@@ -174,7 +174,7 @@ class MoGe_Encoder(nn.Module):
         # pts_depth = pts_depth.masked_fill(~mask.bool(), 1 + max_depth)
 
         # scale depth map smaller to avoid bug
-        pts_depth = pts_depth * 0.6
+        pts_depth = pts_depth * 0.5
 
         # vit encoder to get per-image features
         # Encode

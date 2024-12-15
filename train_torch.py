@@ -47,7 +47,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         else:
             # skip this iter, avoid crash
             print(f"Masking gradients: batch_idx = {batch_idx}, transformer serialization depth exceeds the limit (16)")
-            loss_total = torch.tensor(0.0, device=local_rank, requires_grad=True)   # Set loss to zero
+            loss_total = losses["loss/total"] - losses["loss/total"]  # Set loss to zero
 
         loss_total.backward()  # Backpropagate the scaled loss
 
@@ -90,7 +90,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                     trainer.validate(model_eval, evaluator, val_loader, device='cuda')
 
         # Clean up and free GPU memory
-        if early_phase or step % cfg.run.val_frequency == 0 or step % 200 == 0:
+        if early_phase or step % cfg.run.val_frequency == 0 or step % 100 == 0:
             torch.cuda.empty_cache()
 
         trainer.step += 1 # Account for fractional steps
