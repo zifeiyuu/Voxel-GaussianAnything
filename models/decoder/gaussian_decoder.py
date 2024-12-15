@@ -20,7 +20,7 @@ def get_splits_and_inits(cfg):
             scale_inits += [cfg.model.opacity_scale, 
                             cfg.model.scale_scale,  ### set scale_scale bigger so bigger gaussian initialization
                             1.0,
-                            cfg.model.sh0_scale]
+                            cfg.model.sh_scale]
         bias_inits += [cfg.model.opacity_bias,
                         np.log(cfg.model.scale_bias),
                         0.0,
