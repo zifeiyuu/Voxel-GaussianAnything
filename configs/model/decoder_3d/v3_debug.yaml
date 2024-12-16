@@ -40,5 +40,5 @@ pdnorm_bn: False
 pdnorm_ln: False
 pretrained_ckpt: 
 
-delete_decoder_num: 0 ###### output_dim now depends on how many layers of decoder you want to delete
-all_layer_output: false
+delete_decoder_num: 1 ###### output_dim now depends on how many layers of decoder you want to delete
+all_layer_output: true

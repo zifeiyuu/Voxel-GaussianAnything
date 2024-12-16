@@ -172,9 +172,36 @@ class MoGe_Encoder(nn.Module):
         #fill the inf depth with a desgined value
         # max_depth = pts_depth[torch.isfinite(pts_depth)].max().item()  # Get the maximum valid depth
         # pts_depth = pts_depth.masked_fill(~mask.bool(), 1 + max_depth)
+        # masked_depths = torch.masked_select(pts_depth, ~mask)
+        # if masked_depths.numel() != 0:
+        #     small_threshold = torch.quantile(masked_depths, 0.25).item()  # 25th percentile
+        #     big_threshold = torch.quantile(masked_depths, 0.75).item()    # 75th percentile
+
+        #     # Divide into small and big groups
+        #     too_small = masked_depths[masked_depths <= small_threshold]
+        #     too_big = masked_depths[masked_depths >= big_threshold]
+
+        #     # Print stats
+        #     print(f"Total masked points: {masked_depths.numel()}")
+        #     print(f"Small group num: {too_small.numel()} (Threshold: <= {small_threshold})")
+        #     print(f"Big group num: {too_big.numel()} (Threshold: >= {big_threshold})")
+        #     max_valid_depth = pts_depth[mask.bool()].max().item()
+        #     min_valid_depth = pts_depth[mask.bool()].min().item()
+        #     print(f"Max valid depth: {max_valid_depth}, Min valid depth: {min_valid_depth}")
+        #     print("------------")
+            # print(f"depth max: {torch.max(depth)}, min: {torch.min(depth)}")
+        #     print("------------")
+        #     print(f"MASKED depth max: {torch.max(masked_depths)}, min: {torch.min(masked_depths)}")
+        #     print("------------")
+
+        #     image = inputs[("color_aug", 0, 0)][0].detach().permute(1, 2, 0).cpu().numpy()
+        #     image = (image * 255).astype(np.uint8)
+        #     cv2.imwrite(f"/mnt/ziyuxiao/code/GaussianAnything/output/debug/{time.time()}.png", image)
+
+        # embed()
 
         # scale depth map smaller to avoid bug
-        pts_depth = pts_depth * 1
+        # pts_depth = pts_depth * 1
 
         # vit encoder to get per-image features
         # Encode
