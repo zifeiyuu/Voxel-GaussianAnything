@@ -24,13 +24,18 @@ class LinearHead(nn.Module):
         self.gaussian_heads = nn.ModuleList([
             nn.Linear(in_dim, self.num_output_channels) for in_dim in in_dims
         ])
+
         for gaussian_head in self.gaussian_heads:
             self.parameters_to_train += [{"params": gaussian_head.parameters()}]
 
         # Gaussian parameters initialization
-        for gaussian_head in self.gaussian_heads:
+        for idx, gaussian_head in enumerate(self.gaussian_heads):
+            inv_idx = len(self.gaussian_heads) - idx
             start_channel = 0
-            for out_channel, scale, bias in zip(self.split_dimensions, scales, biases):
+            for feat_idx, (out_channel, scale, bias) in enumerate(zip(self.split_dimensions, scales, biases)):
+                # by default, the init for scale is the second one
+                if feat_idx == 1:
+                    bias += np.log(10 * inv_idx)
                 nn.init.xavier_uniform_(
                     gaussian_head.weight[start_channel:start_channel + out_channel, :], scale)
                 nn.init.constant_(
@@ -62,6 +67,7 @@ class LinearHead(nn.Module):
         integrated_gauss_offset = []
 
         for i, feat in enumerate(feats):
+            # breakpoint()
             gaussian_params = self.gaussian_heads[i](feat) 
             gaussian_params = rearrange(gaussian_params, 'b n d -> b d n')
             integrated_gaussian_params.append(gaussian_params)
