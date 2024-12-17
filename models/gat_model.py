@@ -72,7 +72,7 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d_origin, pts_feat, pts_rgb, pts_depth = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
+        pts3d_origin, pts_feat, pts_rgb, pts_depth_origin = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
         if cfg.model.pre_downsample:
             pts3d_origin, pts_feat, pts_rgb = points_to_voxels(pts3d_origin, pts_feat, pts_rgb, cfg.model.voxel_size)
@@ -115,7 +115,7 @@ class GATModel(BaseModel):
         # outputs["gauss_means_origin"] = pts3d_origin
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         outputs["gauss_means"] = pts3d_reshape
-        outputs[("depth", 0)] = pts_depth
+        outputs[("depth", 0)] = pts_depth_origin
 
         if cfg.model.gaussian_rendering:
             self.process_gt_poses(inputs, outputs)

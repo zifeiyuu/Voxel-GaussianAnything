@@ -104,7 +104,59 @@ class MoGe_Encoder(nn.Module):
             )
         self.backproject_depth = nn.ModuleDict(backproject_depth)
 
+    def add_points_near_large_grads(self, depth_map, rgbs, features, inv_K, threshold=1):
+        # depth_map: (B, H, W)
+        # rgbs: (B, H, W, C)
+        # features: (B, H, W, C)
 
+        B, H, W = depth_map.shape
+        depth_map = depth_map.unsqueeze(1)  # (b, 1, h, w)
+
+        # sobel filters for gradients in x and y
+        sobel_x = torch.tensor([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype=torch.float32, device=depth_map.device).unsqueeze(0).unsqueeze(0)
+        sobel_y = torch.tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype=torch.float32, device=depth_map.device).unsqueeze(0).unsqueeze(0)
+        # compute gradients
+        grad_x = F.conv2d(depth_map, sobel_x, padding=1) 
+        grad_y = F.conv2d(depth_map, sobel_y, padding=1) 
+        grad_magnitude = torch.sqrt(grad_x ** 2 + grad_y ** 2)
+        grad_mask = (grad_magnitude > threshold).float()
+
+        # get neighboring points
+        kernel = torch.ones((1, 1, 3, 3), device=depth_map.device)  # 3x3 dilation kernel
+        dilated_grad_mask = F.conv2d(grad_mask, kernel, padding=1) > 0
+        dilated_grad_mask = dilated_grad_mask.float() 
+
+        new_pts3d_list = []
+        new_features_list = []
+        new_rgbs_list = []
+
+        for b in range(B):
+            valid_indices = dilated_grad_mask[b].nonzero(as_tuple=False)  # (N, 2) -> [y, x]
+
+            y, x = valid_indices[:, 0], valid_indices[:, 1]  # DIRECTLY COPY EXISTING FEATURE!
+            z = depth_map[b, 0, y, x] 
+            u = x.float()
+            v = y.float()
+
+            # Unproject to 3D space
+            ones = torch.ones_like(z)
+            pixel_coords = torch.stack([u, v, ones], dim=1).unsqueeze(-1) 
+            K_inv = inv_K[b].unsqueeze(0).repeat(pixel_coords.size(0), 1, 1)  # (N, 3, 3)
+            pts3d_new = torch.bmm(K_inv, pixel_coords).squeeze(-1) * z.unsqueeze(-1)  # (N, 3)
+
+            rgbs_new = rgbs[b, y, x]  # (N, 3)  # DIRECTLY COPY EXISTING FEATURE!
+            features_new = features[b, y, x]  # (N, D)     # DIRECTLY COPY EXISTING FEATURE!
+
+            new_pts3d_list.append(pts3d_new)
+            new_features_list.append(features_new)
+            new_rgbs_list.append(rgbs_new)
+
+        new_pts3d = torch.cat(new_pts3d_list, dim=0).reshape(B, -1, 3)  # (B, N_new, 3)
+        new_features = torch.cat(new_features_list, dim=0).reshape(B, -1, features.shape[-1])  # (B, N_new, D)
+        new_rgbs = torch.cat(new_rgbs_list, dim=0).reshape(B, -1, rgbs.shape[-1])  # (B, N_new, 3)
+
+        return new_pts3d, new_features, new_rgbs
+        
     def forward(self, inputs):
         #rgb
         rgbs = inputs["color_aug", 0, 0]  
@@ -173,32 +225,6 @@ class MoGe_Encoder(nn.Module):
         # max_depth = pts_depth[torch.isfinite(pts_depth)].max().item()  # Get the maximum valid depth
         # pts_depth = pts_depth.masked_fill(~mask.bool(), 1 + max_depth)
         # masked_depths = torch.masked_select(pts_depth, ~mask)
-        # if masked_depths.numel() != 0:
-        #     small_threshold = torch.quantile(masked_depths, 0.25).item()  # 25th percentile
-        #     big_threshold = torch.quantile(masked_depths, 0.75).item()    # 75th percentile
-
-        #     # Divide into small and big groups
-        #     too_small = masked_depths[masked_depths <= small_threshold]
-        #     too_big = masked_depths[masked_depths >= big_threshold]
-
-        #     # Print stats
-        #     print(f"Total masked points: {masked_depths.numel()}")
-        #     print(f"Small group num: {too_small.numel()} (Threshold: <= {small_threshold})")
-        #     print(f"Big group num: {too_big.numel()} (Threshold: >= {big_threshold})")
-        #     max_valid_depth = pts_depth[mask.bool()].max().item()
-        #     min_valid_depth = pts_depth[mask.bool()].min().item()
-        #     print(f"Max valid depth: {max_valid_depth}, Min valid depth: {min_valid_depth}")
-        #     print("------------")
-            # print(f"depth max: {torch.max(depth)}, min: {torch.min(depth)}")
-        #     print("------------")
-        #     print(f"MASKED depth max: {torch.max(masked_depths)}, min: {torch.min(masked_depths)}")
-        #     print("------------")
-
-        #     image = inputs[("color_aug", 0, 0)][0].detach().permute(1, 2, 0).cpu().numpy()
-        #     image = (image * 255).astype(np.uint8)
-        #     cv2.imwrite(f"/mnt/ziyuxiao/code/GaussianAnything/output/debug/{time.time()}.png", image)
-
-        # embed()
 
         # scale depth map smaller to avoid bug
         # pts_depth = pts_depth * 1
@@ -210,7 +236,7 @@ class MoGe_Encoder(nn.Module):
         encoder_outputs = (encoder_outputs + cls_token.unsqueeze(1)).contiguous()
         
         pts_feat = self.pts_feat_head(encoder_outputs)  # (B, H / P * W / P, EMBED_DIM) ->(B, H / P * W / P, p^2*D)
-        pts_feat = rearrange(pts_feat, 'b hpwp (p d) -> b (hpwp p) d', p=self.patch_size**2, d=self.pts_feat_dim)               
+        pts_feat = rearrange(pts_feat, 'b hpwp (p d) -> b (hpwp p) d', p=self.patch_size**2, d=self.pts_feat_dim)  # B H*W D          
         
         # back project depth to world splace
         scale = self.cfg.model.scales[0]
@@ -219,7 +245,7 @@ class MoGe_Encoder(nn.Module):
 
         #directly give decoder rgb information for each 3d point
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
-        pts_depth = rearrange(pts_depth, 'b (h w) c -> b c h w', h=H, w=W) #B (H W) C
+        pts_depth_origin = rearrange(pts_depth, 'b (h w) c -> b c h w', h=H, w=W) #B (H W) C
         # # mask out invalid points
         # if torch.count_nonzero(mask).item() != H*W:
         #     D = self.pts_feat_dim
@@ -229,4 +255,13 @@ class MoGe_Encoder(nn.Module):
         #         pts3d = pts3d[mask.expand(-1, -1, 3)].view(B, -1, 3)
         #         pts_rgb = pts_rgb[mask.expand(-1, -1, 3)].view(B, -1, 3)
 
-        return pts3d, pts_feat, pts_rgb, pts_depth
+        padding = self.cfg.model.padding
+        if padding:
+            rgbs = rearrange(rgbs, 'b c h w -> b h w c')
+            feats = rearrange(pts_feat, 'b (h w) d -> b h w d', h=H, w=W)
+            padded_pts3d, padded_feat, padded_rgb = self.add_points_near_large_grads(depth, rgbs, feats, inv_K, threshold=self.cfg.model.large_grad_threshold)
+            pts3d = torch.cat([pts3d, padded_pts3d], dim=1)
+            pts_feat = torch.cat([pts_feat, padded_feat], dim=1)
+            pts_rgb = torch.cat([pts_rgb, padded_rgb], dim=1)
+
+        return pts3d, pts_feat, pts_rgb, pts_depth_origin

@@ -11,6 +11,9 @@ gauss_novel_frames: [-1, 1, 2] #
 pre_downsample: false
 voxel_size: 0.03
 
+padding: false
+large_grad_threshold: 3
+
 use_decoder_3d: true
 normalize_before_decoder_3d: true
 grid_size: 0.01
