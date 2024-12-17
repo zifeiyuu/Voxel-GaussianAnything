@@ -27,7 +27,7 @@ randomise_bg_colour: true
 max_sh_degree: 3
 scaled_offset: false
 one_gauss_decoder: false
-predict_offset: false #
+predict_offset: true #
 bg_colour: [0.5, 0.5, 0.5]
 shift_rays_half_pixel: forward
 
@@ -45,4 +45,4 @@ scale_lambda: 0.01
 depth_bias: -0.1
 xyz_bias: 0.0
 opacity_bias: 0.1
-scale_bias: 0.02
+scale_bias: 0.001
