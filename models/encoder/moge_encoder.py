@@ -108,7 +108,6 @@ class MoGe_Encoder(nn.Module):
         # depth_map: (B, H, W)
         # rgbs: (B, H, W, C)
         # features: (B, H, W, C)
-
         B, H, W = depth_map.shape
         depth_map = depth_map.unsqueeze(1)  # (b, 1, h, w)
 
@@ -151,6 +150,18 @@ class MoGe_Encoder(nn.Module):
             new_features_list.append(features_new)
             new_rgbs_list.append(rgbs_new)
 
+
+            # # #debug
+            # image = self.color[0].detach().cpu().numpy()
+            # image = (image * 255).astype(np.uint8)
+            # points = valid_indices.cpu().numpy()[:, 1:][::-1] 
+            # for point in points:
+            #     y, x = point
+            #     if 0 <= x < W and 0 <= y < H:
+            #         image[:, y, x] = [255, 0, 0]
+            # image = np.transpose(image, (1, 2, 0)) 
+            # cv2.imwrite(f"/mnt/ziyuxiao/code/GaussianAnything/output/debug/{time.time()}.png", image)
+
         new_pts3d = torch.cat(new_pts3d_list, dim=0).reshape(B, -1, 3)  # (B, N_new, 3)
         new_features = torch.cat(new_features_list, dim=0).reshape(B, -1, features.shape[-1])  # (B, N_new, D)
         new_rgbs = torch.cat(new_rgbs_list, dim=0).reshape(B, -1, rgbs.shape[-1])  # (B, N_new, 3)
@@ -159,6 +170,7 @@ class MoGe_Encoder(nn.Module):
         
     def forward(self, inputs):
         #rgb
+        self.color = inputs["color_aug", 0, 0]  
         rgbs = inputs["color_aug", 0, 0]  
         #use gt intrinsics
         gt_K = inputs[("K_src", 0)]
@@ -255,7 +267,7 @@ class MoGe_Encoder(nn.Module):
         #         pts3d = pts3d[mask.expand(-1, -1, 3)].view(B, -1, 3)
         #         pts_rgb = pts_rgb[mask.expand(-1, -1, 3)].view(B, -1, 3)
 
-        padding = self.cfg.model.padding
+        padding = self.cfg.model.depth_padding
         if padding:
             rgbs = rearrange(rgbs, 'b c h w -> b h w c')
             feats = rearrange(pts_feat, 'b (h w) d -> b h w d', h=H, w=W)

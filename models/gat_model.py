@@ -60,8 +60,11 @@ class GATModel(BaseModel):
             self.parameters_to_train += self.decoder_3d.get_parameter_groups()
             head_in_dim = self.decoder_3d.transformer.out_dim
 
-        self.decoder_gs = LinearHead(cfg, head_in_dim)
-        self.parameters_to_train += self.decoder_gs.get_parameter_groups()
+        self.decoder_gs = nn.ModuleList([
+            LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale[i], xyz_bias=cfg.model.xyz_bias[i]) for i in range(cfg.model.overall_padding)
+        ])
+        for i in range(cfg.model.overall_padding):
+            self.parameters_to_train += self.decoder_gs[i].get_parameter_groups()
 
         self.use_checkpoint = False
         self.use_reentrant = False
@@ -89,16 +92,24 @@ class GATModel(BaseModel):
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
             pts3d = torch.cat(pts3d, dim=1)
 
-            # predict gaussian parameters for each point
-            outputs = self.decoder_gs(pts_feat)
+            outputs_list = []
+            pts3d_list = []
+            for i in range(cfg.model.overall_padding):
+                pts3d_list.append(pts3d)
+                decoder_output = self.decoder_gs[i](pts_feat) 
+                outputs_list.append(decoder_output)
+
+            pts3d = torch.cat(pts3d_list, dim=1)
+            outputs = {key: torch.cat([output[key] for output in outputs_list], dim=-1) for key in outputs_list[0]}
+
         else:
             mean = pts3d_origin.mean(dim=1, keepdim=True) # (B, 1, 3)
             z_median = torch.median(pts3d_origin[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
             pts3d_normed = (pts3d_origin - mean) / (z_median + 1e-6) # (B, N, 3)
             pts3d = pts3d_origin
 
-            # predict gaussian parameters for each point
-            outputs = self.decoder_gs([pts_feat])
+            #simple approach## only one decoder
+            outputs = self.decoder_gs[0](pts_feat)
 
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         if self.use_decoder_3d and self.normalize_before_decoder_3d:
@@ -107,12 +118,11 @@ class GATModel(BaseModel):
 
         #offset after normalize
         if cfg.model.predict_offset:
-            offset = outputs["gauss_offset"]
-            offset = rearrange(offset, "b s c n -> b (s n) c", s=cfg.model.gaussians_per_pixel)
-            pts3d = pts3d + offset
+            for i in range(cfg.model.overall_padding):
+                offset = outputs["gauss_offset"]
+                offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
+                pts3d = pts3d + offset
 
-        # pts3d_origin = rearrange(pts3d_origin, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
-        # outputs["gauss_means_origin"] = pts3d_origin
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         outputs["gauss_means"] = pts3d_reshape
         outputs[("depth", 0)] = pts_depth_origin

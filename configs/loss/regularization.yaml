@@ -9,4 +9,4 @@ gauss_min_scale:
 
 gauss_offset:
   weight: 0.01
-  thresh: 0.8
+  thresh: 1.0

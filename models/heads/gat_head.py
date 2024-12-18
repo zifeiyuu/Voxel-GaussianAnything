@@ -10,7 +10,7 @@ from IPython import embed
 import random
 
 class LinearHead(nn.Module):
-    def __init__(self, cfg, in_dims=[32]):
+    def __init__(self, cfg, in_dims=[32], xyz_scale=0.01, xyz_bias=0.0):
         super().__init__()
 
         self.cfg = cfg
@@ -52,8 +52,8 @@ class LinearHead(nn.Module):
 
             # Offset parameters initialization
             for offset_head in self.offset_heads:
-                nn.init.xavier_uniform_(offset_head.weight[:, :], cfg.model.xyz_scale)
-                nn.init.constant_(offset_head.bias[:], cfg.model.xyz_bias)
+                nn.init.xavier_uniform_(offset_head.weight[:, :], xyz_scale)
+                nn.init.constant_(offset_head.bias[:], xyz_bias)
 
         self.gaussian_decoder = GaussianDecoder(cfg)
         self.parameters_to_train += [{"params": self.gaussian_decoder.parameters()}]
