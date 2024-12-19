@@ -104,7 +104,38 @@ class MoGe_Encoder(nn.Module):
             )
         self.backproject_depth = nn.ModuleDict(backproject_depth)
 
-    def add_points_near_large_grads(self, depth_map, rgbs, features, inv_K, threshold=1):
+    def selective_padding_selectOnly(self, depth_map, rgbs, features, inv_K, threshold=1):
+        # depth_map: (B, H, W)
+        # rgbs: (B, H, W, C)
+        # features: (B, H, W, C)
+        B, H, W = depth_map.shape
+        depth_map = depth_map.unsqueeze(1)  # (b, 1, h, w)
+
+        # sobel filters for gradients in x and y
+        sobel_x = torch.tensor([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype=torch.float32, device=depth_map.device).unsqueeze(0).unsqueeze(0)
+        sobel_y = torch.tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype=torch.float32, device=depth_map.device).unsqueeze(0).unsqueeze(0)
+        # compute gradients
+        grad_x = F.conv2d(depth_map, sobel_x, padding=1) 
+        grad_y = F.conv2d(depth_map, sobel_y, padding=1) 
+        grad_magnitude = torch.sqrt(grad_x ** 2 + grad_y ** 2)
+        grad_mask = (grad_magnitude > threshold).float()
+        # get neighboring points
+        kernel = torch.ones((1, 1, 3, 3), device=depth_map.device)  # 3x3 dilation kernel
+        dilated_grad_mask = F.conv2d(grad_mask, kernel, padding=1) > 0
+
+        # Create an edge mask
+        edge_mask = torch.zeros_like(depth_map.squeeze(1)) # (B, H, W)
+        # Number of pixels to pad around the edges
+        edge_padding = self.cfg.model.edge_padding_pixel
+        edge_mask[:, :edge_padding, :] = 1  
+        edge_mask[:, -edge_padding:, :] = 1
+        edge_mask[:, :, :edge_padding] = 1  
+        edge_mask[:, :, -edge_padding:] = 1 
+
+        combined_mask = dilated_grad_mask | edge_mask.bool() 
+        return combined_mask
+    
+    def selective_padding(self, depth_map, rgbs, features, inv_K, threshold=1):
         # depth_map: (B, H, W)
         # rgbs: (B, H, W, C)
         # features: (B, H, W, C)
@@ -267,13 +298,16 @@ class MoGe_Encoder(nn.Module):
         #         pts3d = pts3d[mask.expand(-1, -1, 3)].view(B, -1, 3)
         #         pts_rgb = pts_rgb[mask.expand(-1, -1, 3)].view(B, -1, 3)
 
-        padding = self.cfg.model.depth_padding
+        padding_select = None
+        padding = self.cfg.model.selective_padding
         if padding:
             rgbs = rearrange(rgbs, 'b c h w -> b h w c')
-            feats = rearrange(pts_feat, 'b (h w) d -> b h w d', h=H, w=W)
-            padded_pts3d, padded_feat, padded_rgb = self.add_points_near_large_grads(depth, rgbs, feats, inv_K, threshold=self.cfg.model.large_grad_threshold)
-            pts3d = torch.cat([pts3d, padded_pts3d], dim=1)
-            pts_feat = torch.cat([pts_feat, padded_feat], dim=1)
-            pts_rgb = torch.cat([pts_rgb, padded_rgb], dim=1)
+            feats = rearrange(pts_feat, 'b (h w) d -> b h w d', h=H, w=W)            
+            padding_select = self.selective_padding_selectOnly(depth, rgbs, feats, inv_K, threshold=self.cfg.model.large_grad_threshold)
 
-        return pts3d, pts_feat, pts_rgb, pts_depth_origin
+            # padded_pts3d, padded_feat, padded_rgb = self.selective_padding(depth, rgbs, feats, inv_K, threshold=self.cfg.model.large_grad_threshold)
+            # pts3d = torch.cat([pts3d, padded_pts3d], dim=1)
+            # pts_feat = torch.cat([pts_feat, padded_feat], dim=1)
+            # pts_rgb = torch.cat([pts_rgb, padded_rgb], dim=1)
+
+        return pts3d, pts_feat, pts_rgb, pts_depth_origin, padding_select

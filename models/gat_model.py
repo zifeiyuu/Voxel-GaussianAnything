@@ -61,10 +61,17 @@ class GATModel(BaseModel):
             head_in_dim = self.decoder_3d.transformer.out_dim
 
         self.decoder_gs = nn.ModuleList([
-            LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale[i], xyz_bias=cfg.model.xyz_bias[i]) for i in range(cfg.model.overall_padding)
+            LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale[i], xyz_bias=cfg.model.xyz_bias[i])
+            for i in range(cfg.model.overall_padding)
         ])
-        for i in range(cfg.model.overall_padding):
-            self.parameters_to_train += self.decoder_gs[i].get_parameter_groups()
+
+        if self.cfg.model.selective_padding:
+            self.decoder_gs.append(
+                LinearHead(cfg, [head_in_dim[-1]], xyz_scale=cfg.model.xyz_scale[-1], xyz_bias=cfg.model.xyz_bias[-1],  scale_mul=10) #want big gaussian
+            )
+        # Collect parameters from all decoders
+        for decoder in self.decoder_gs:
+            self.parameters_to_train += decoder.get_parameter_groups()
 
         self.use_checkpoint = False
         self.use_reentrant = False
@@ -75,7 +82,7 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d_origin, pts_feat, pts_rgb, pts_depth_origin = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
+        pts3d_origin, pts_feat, pts_rgb, pts_depth_origin, padding_select = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
         if cfg.model.pre_downsample:
             pts3d_origin, pts_feat, pts_rgb = points_to_voxels(pts3d_origin, pts_feat, pts_rgb, cfg.model.voxel_size)
@@ -90,6 +97,16 @@ class GATModel(BaseModel):
                 pts3d = pts3d_origin
 
             pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
+            # apply padding at my selected place
+            if self.cfg.model.selective_padding:
+                B, _, _ = pts3d[-1].shape
+                assert B == 1, "This function only supports single batch input now"
+                mask_flattened = padding_select.view(-1)  # (B, H*W)
+                valid_indices = mask_flattened.nonzero(as_tuple=False).squeeze(-1)  # (N,)
+
+                padded_pts3d = pts3d[-1][0, valid_indices, :].unsqueeze(0)  # (1, N, 3)
+                padded_pts_feat = [pts_feat[-1][0, valid_indices, :].unsqueeze(0)]  # (1, N, D)
+
             pts3d = torch.cat(pts3d, dim=1)
 
             outputs_list = []
@@ -98,6 +115,11 @@ class GATModel(BaseModel):
                 pts3d_list.append(pts3d)
                 decoder_output = self.decoder_gs[i](pts_feat) 
                 outputs_list.append(decoder_output)
+            if self.cfg.model.selective_padding:
+                pts3d_list.append(padded_pts3d)
+                decoder_output = self.decoder_gs[-1](padded_pts_feat) 
+                outputs_list.append(decoder_output)
+
 
             pts3d = torch.cat(pts3d_list, dim=1)
             outputs = {key: torch.cat([output[key] for output in outputs_list], dim=-1) for key in outputs_list[0]}

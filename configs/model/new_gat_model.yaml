@@ -12,8 +12,9 @@ pre_downsample: false
 voxel_size: 0.03
 
 # NOT USED
-depth_padding: false
-large_grad_threshold: 0.01
+selective_padding: true
+large_grad_threshold: 0.1
+edge_padding_pixel: 10
 
 use_decoder_3d: true
 normalize_before_decoder_3d: true
@@ -26,7 +27,7 @@ max_depth: 20
 
 # gaussian parameters
 gaussians_per_pixel: 1    ###### NOT used for overall padding, NEED TO REMOVE THIS CONFIG FINALLY
-overall_padding: 2 # <- USE THIS CONFIG 
+overall_padding: 1 # <- USE THIS CONFIG 
 
 gaussian_rendering: true
 randomise_bg_colour: true
