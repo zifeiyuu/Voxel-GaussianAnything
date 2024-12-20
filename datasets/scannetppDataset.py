@@ -266,7 +266,7 @@ class scannetppDataset(Dataset):
         else:
             inputs_color_aug = self.to_tensor(self.color_aug_fn(img_scale))
 
-        return inputs_color, inputs_color_aug
+        return inputs_color, inputs_color_aug, img.size
     
     def process_depth(self, depth_path):
         options=cv2.IMREAD_UNCHANGED
@@ -275,32 +275,43 @@ class scannetppDataset(Dataset):
         depthmap = cv2.imread(depth_path, options)
         if depthmap is None:
             return None
-            # raise IOError(f'Could not load image={depth_path} with {options=}')
         if depthmap.ndim == 3:
             depthmap = cv2.cvtColor(depthmap, cv2.COLOR_BGR2RGB)
         depthmap = depthmap.astype(np.float32)
-        
-        # Resize the image according to the first scale
-        # inputs_depth = self.resize[0](depthmap)
+        depthmap = torch.tensor(depthmap, dtype=torch.float32)
 
-        return depthmap
+        H, W = depthmap.shape
+        x = torch.linspace(0, W - 1, W)
+        y = torch.linspace(0, H - 1, H)
+        xv, yv = torch.meshgrid(x, y, indexing="xy")  #  (H, W)
+
+        # Flatten coordinates and depth
+        xys = torch.stack([xv, yv], dim=-1).reshape(-1, 2)  # (H*W, 2)
+        depth = depthmap.view(-1, 1)  # (H*W, 1)
+
+        # Normalize pixel coordinates to range [-1, 1]
+        img_dim = torch.tensor([W, H], dtype=torch.float32).view(1, 2) 
+        xys_scaled = (xys / img_dim - 0.5) * 2  
+        xyd = torch.cat([xys_scaled, depth], dim=1) 
+
+        return xyd
     
     def process_pose(self, c2w):
         inputs_T_c2w = torch.from_numpy(c2w)
         return inputs_T_c2w
     
-    def process_intrinsics(self, K):
+    def process_intrinsics(self, K, original_height, original_width):
         # Scale the intrinsic matrix for the target image size
         K_scale_target = K.copy()
-        K_scale_target[0, :] *= self.image_size[1] / self.cfg.dataset.original_width
-        K_scale_target[1, :] *= self.image_size[0] / self.cfg.dataset.original_height
+        K_scale_target[0, :] *= self.image_size[1] / original_width
+        K_scale_target[1, :] *= self.image_size[0] / original_height
 
         # Scale the intrinsic matrix for the source image size (considering padding)
         K_scale_source = K.copy()
-        K_scale_source[0, 0] *= self.image_size[1] / self.cfg.dataset.original_width
-        K_scale_source[1, 1] *= self.image_size[0] / self.cfg.dataset.original_height
-        K_scale_source[0, 2] *= (self.image_size[1] + self.cfg.dataset.pad_border_aug * 2) / self.cfg.dataset.original_width
-        K_scale_source[1, 2] *= (self.image_size[0] + self.cfg.dataset.pad_border_aug * 2) / self.cfg.dataset.original_height
+        K_scale_source[0, 0] *= self.image_size[1] / original_width
+        K_scale_source[1, 1] *= self.image_size[0] / original_height
+        K_scale_source[0, 2] *= (self.image_size[1] + self.cfg.dataset.pad_border_aug * 2) / original_width
+        K_scale_source[1, 2] *= (self.image_size[0] + self.cfg.dataset.pad_border_aug * 2) / original_height
         
 
         # Compute the inverse of the scaled source intrinsic matrix
@@ -349,18 +360,18 @@ class scannetppDataset(Dataset):
             c2w = pose_data['poses'][frame_idx]
             inputs_T_c2w = self.process_pose(c2w)
 
-            intrinsic = pose_data['intrinsics'][frame_idx]
-            inputs_K_tgt, inputs_K_src, inputs_inv_K_src = self.process_intrinsics(intrinsic)
-            
             # Process the image for the current frame
             img_name = pose_data['images'][frame_idx][:-4] + '.jpg'
             img_path =  self.dataset_folder / self.mode / seq_key / 'images' / img_name
-            inputs_color, inputs_color_aug = self.process_image(img_path)
+            inputs_color, inputs_color_aug, orig_size = self.process_image(img_path)
+
+            intrinsic = pose_data['intrinsics'][frame_idx]
+            inputs_K_tgt, inputs_K_src, inputs_inv_K_src = self.process_intrinsics(intrinsic, orig_size[1], orig_size[0])
 
             if have_depth:
                 depth_name = pose_data['images'][frame_idx][:-4] + '.png'
                 depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
-                inputs_depth = self.process_depth(depth_path)
+                xyd = self.process_depth(depth_path)
 
             # Additional metadata
             first_img_name = pose_data['images'][0][:-4]  # The source frame
@@ -375,7 +386,7 @@ class scannetppDataset(Dataset):
             inputs[("T_c2w", frame_name)] = inputs_T_c2w
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
             if have_depth and frame_name == 0:
-                inputs[("depth_sparse", frame_name)] = torch.tensor(inputs_depth, dtype=torch.float32)
+                inputs[("depth_sparse", 0)] = xyd
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 

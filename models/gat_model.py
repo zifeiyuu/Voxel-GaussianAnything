@@ -78,7 +78,6 @@ class GATModel(BaseModel):
 
     def forward(self, inputs):
         cfg = self.cfg
-
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
