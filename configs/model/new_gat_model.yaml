@@ -9,7 +9,8 @@ scales: [0]
 gauss_novel_frames: [-1, 1, 2] #
 
 pre_downsample: false
-voxel_size: 0.03
+voxel_size: 0.02
+donsample_ratio: 0.2
 
 use_decoder_3d: true
 normalize_before_decoder_3d: true

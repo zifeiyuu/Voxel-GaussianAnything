@@ -75,7 +75,7 @@ class GATModel(BaseModel):
         pts3d_origin, pts_feat, pts_rgb, pts_depth = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
         if cfg.model.pre_downsample:
-            pts3d_origin, pts_feat, pts_rgb = points_to_voxels(pts3d_origin, pts_feat, pts_rgb, cfg.model.voxel_size)
+            pts3d_origin, pts_feat, pts_rgb = random_droping(pts3d_origin, pts_feat, pts_rgb, cfg.model.donsample_ratio)
 
         if self.use_decoder_3d:
             if self.normalize_before_decoder_3d:
@@ -155,3 +155,10 @@ def points_to_voxels(pts3d_origin, pts_feat, pts_rgb, voxel_size):
         padded_colors[b, :M] = voxel_colors[b]
 
     return padded_xyz.float().to(pts3d_origin.device), padded_features.to(pts_feat.device), padded_colors.to(pts_rgb.device)
+
+def random_droping(pts3d_origin, pts_feat, pts_rgb, ratio):
+    B, N, _ = pts3d_origin.shape
+    device = pts3d_origin.device
+    mask = (torch.rand(N, device=device) > ratio)
+    # breakpoint()
+    return pts3d_origin[:, mask], pts_feat[:, mask], pts_rgb[:, mask]

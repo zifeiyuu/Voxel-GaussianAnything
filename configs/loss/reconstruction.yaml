@@ -1,5 +1,5 @@
 mse:
-  weight: 1.0
+  weight: 0.15
   type: l1
 
 ssim:
