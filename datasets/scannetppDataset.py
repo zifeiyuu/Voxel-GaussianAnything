@@ -21,6 +21,8 @@ from datasets.scannetpp.masks import calculate_in_frustum_mask_single
 from datasets.data import process_projs, data_to_c2w, pil_loader, get_sparse_depth
 from datasets.tardataset import TarDataset
 from misc.localstorage import copy_to_local_storage, extract_tar, get_local_dir
+from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, depthmap_to_absolute_camera_coordinates
+from misc.visualise_3d import storePly # for debugging
 
 from IPython import embed
 logger = logging.getLogger(__name__)
@@ -350,8 +352,8 @@ class scannetppDataset(Dataset):
             total_frame_num = len(src_and_tgt_frame_idxs)
             frame_names = list(range(total_frame_num))
 
-        have_depth = seq_key not in self._missing_scans
-
+        # have_depth = seq_key not in self._missing_scans
+        have_depth = True
         inputs = {}
 
         # Iterate over the frames and process each frame
@@ -385,8 +387,12 @@ class scannetppDataset(Dataset):
             inputs[("color_aug", frame_name, 0)] = inputs_color_aug
             inputs[("T_c2w", frame_name)] = inputs_T_c2w
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
-            if have_depth and frame_name == 0:
-                inputs[("depth_sparse", 0)] = xyd
+            if have_depth:
+                inputs[("depth_sparse", frame_name)] = torch.tensor(inputs_depth, dtype=torch.float32)
+            pts3d_debug, _ = depthmap_to_absolute_camera_coordinates(inputs_depth, intrinsic, inputs_T_c2w.detach().cpu().numpy())
+            import numpy as np
+            storePly(f"/home/maoyucheng/code/GaussianAnything/debug_vis/pts3d_{frame_name}.ply", pts3d_debug.reshape(-1, 3), np.ones_like(pts3d_debug).reshape(-1, 3))
+        breakpoint()
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 
@@ -428,3 +434,12 @@ class scannetppDataset(Dataset):
     #         'sky_mask': depthmap <= 0.0,
     #     }
     #     return view
+    
+if __name__ == "__main__":
+    
+    # from .loading_utils import read_extrinsics_binary, read_h5py, read_img
+    
+    dataset = ScannetppDataset(data_path="/scratch/bcdm/ymao3/scannetpp")
+    
+    for idx in np.random.permutation(len(dataset)):
+        data = dataset[idx]

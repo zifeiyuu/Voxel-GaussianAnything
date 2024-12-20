@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import logging
 import time
 import torch.nn as nn
@@ -14,7 +15,8 @@ from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, ren
 from .base_model import BaseModel
 from .heads.gat_head import LinearHead
 from misc.util import add_source_frame_id
-from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
+from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, depthmap_to_absolute_camera_coordinates
+from misc.visualise_3d import storePly # for debugging
 
 from .decoder.pointcloud_decoder import PointTransformerDecoder
 
@@ -150,6 +152,18 @@ class GATModel(BaseModel):
 
         if cfg.model.gaussian_rendering:
             self.process_gt_poses(inputs, outputs)
+            # breakpoint()
+            for i in [-1, 0, 1, 2]:
+                
+                K = inputs[('K_src', i)][0]
+                c2w = inputs[('T_c2w', i)][0]
+                rgb = inputs[('color', i, 0)][0]
+                depth = inputs[('depth_sparse', i)][0]
+
+                pts3d_debug, _ = depthmap_to_absolute_camera_coordinates(depth.detach().cpu().numpy(), K.detach().cpu().numpy(), c2w.detach().cpu().numpy())
+                import numpy as np
+                storePly(f"/home/maoyucheng/code/GaussianAnything/debug_vis/pts3d_{i}.ply", pts3d_debug.reshape(-1, 3), np.ones_like(pts3d_debug).reshape(-1, 3))
+            breakpoint()
             self.render_images(inputs, outputs)
 
         return outputs

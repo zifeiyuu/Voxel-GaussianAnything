@@ -6,14 +6,14 @@ depth_path: #/data/datasets/re10k
 unpack_pcl_tar: false
 preload_depths: false
 ransac_on_the_fly: false
-train_split_path: ['nvs_sem_train.txt']  # 'nvs_sem_val.txt'
+train_split_path: ['nvs_sem_train.txt']  # 'nvs_sem_val.txt'z
 test_split_path: ['mini_test.txt'] # 'nvs_test.txt'
 
 height: 224 #256 448 384 [462, 616]
-width: 336 #384 672 608
+width: 336 #384 672 608s
 
-original_width: 1035.0 #1752.0  920.0 1035.0
-original_height: 690.0 #1168.0 690.0 690.0
+original_width: 1035.0 #1752.0  920.0
+original_height: 690.0 #1168.0 690.0
 
 znear: 0.01
 zfar: 100.0
