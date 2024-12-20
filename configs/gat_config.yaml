@@ -2,11 +2,11 @@ defaults:
   - _self_
   - hydra: defaults
   - model: new_gat_model 
-  - dataset: pixelsplat # pixelsplat scannetpp
+  - dataset: scannetpp # pixelsplat scannetpp
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "multiscale+selective_paddings" # moge_multiscale_padding_lpips
+  exp_name: "scannetpp_dslr" # moge_multiscale_padding_lpips
   file: "gat_config.yaml"
 
 data_loader:
@@ -44,7 +44,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 500
+  log_frequency: 1000
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5

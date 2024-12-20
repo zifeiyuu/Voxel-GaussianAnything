@@ -374,8 +374,8 @@ class scannetppDataset(Dataset):
             inputs[("color_aug", frame_name, 0)] = inputs_color_aug
             inputs[("T_c2w", frame_name)] = inputs_T_c2w
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
-            if have_depth:
-                inputs[("depth", frame_name, 0)] = inputs_depth        
+            if have_depth and frame_name == 0:
+                inputs[("depth_sparse", frame_name)] = torch.tensor(inputs_depth, dtype=torch.float32)
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 
