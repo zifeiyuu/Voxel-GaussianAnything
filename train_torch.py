@@ -49,9 +49,6 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
             # skip this iter, avoid crash
             print(f"Masking gradients: batch_idx = {batch_idx}, transformer serialization depth exceeds the limit (16)")
             loss_total = losses["loss/total"] - losses["loss/total"]  # Set loss to zero
-            # image = inputs[("color_aug", 0, 0)][0].detach().cpu().numpy()
-            # image = (image * 255).astype(np.uint8)
-            # cv2.imwrite(f"/mnt/ziyuxiao/code/GaussianAnything/output/debug/{time.time()}.png", image)
 
         loss_total.backward()  # Backpropagate the scaled loss
 

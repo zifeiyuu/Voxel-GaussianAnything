@@ -21,6 +21,8 @@ from datasets.scannetpp.masks import calculate_in_frustum_mask_single
 from datasets.data import process_projs, data_to_c2w, pil_loader, get_sparse_depth
 from datasets.tardataset import TarDataset
 from misc.localstorage import copy_to_local_storage, extract_tar, get_local_dir
+from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, depthmap_to_absolute_camera_coordinates
+from misc.visualise_3d import storePly#, save_depth # for debugging
 
 from IPython import embed
 logger = logging.getLogger(__name__)
@@ -81,11 +83,12 @@ class scannetppDataset(Dataset):
             self.saturation = 0.2
             self.hue = 0.1
 
-        self.resize = {}
+        self.resize, self.depth_resize = {}, {}
         for i in range(self.num_scales):
             s = 2 ** i
             new_size = (self.image_size[0] // s, self.image_size[1] // s)
             self.resize[i] = T.Resize(new_size, interpolation=self.interp)
+            self.depth_resize[i] = T.Resize(new_size, interpolation=Image.NEAREST)
         
         # load dilation file
         self.dilation = cfg.dataset.dilation
@@ -266,7 +269,7 @@ class scannetppDataset(Dataset):
         else:
             inputs_color_aug = self.to_tensor(self.color_aug_fn(img_scale))
 
-        return inputs_color, inputs_color_aug
+        return inputs_color, inputs_color_aug, img.size
     
     def process_depth(self, depth_path):
         options=cv2.IMREAD_UNCHANGED
@@ -275,32 +278,31 @@ class scannetppDataset(Dataset):
         depthmap = cv2.imread(depth_path, options)
         if depthmap is None:
             return None
-            # raise IOError(f'Could not load image={depth_path} with {options=}')
         if depthmap.ndim == 3:
             depthmap = cv2.cvtColor(depthmap, cv2.COLOR_BGR2RGB)
-        depthmap = depthmap.astype(np.float32)
+        depthmap = depthmap.astype(np.float32) / 1000
         
-        # Resize the image according to the first scale
-        # inputs_depth = self.resize[0](depthmap)
-
-        return depthmap
+        depthmap_scale = self.to_tensor(depthmap)
+        depthmap_scale = self.depth_resize[0](depthmap_scale)
+       
+        return depthmap_scale.squeeze()
     
     def process_pose(self, c2w):
         inputs_T_c2w = torch.from_numpy(c2w)
         return inputs_T_c2w
     
-    def process_intrinsics(self, K):
+    def process_intrinsics(self, K, original_height, original_width):
         # Scale the intrinsic matrix for the target image size
         K_scale_target = K.copy()
-        K_scale_target[0, :] *= self.image_size[1] / self.cfg.dataset.original_width
-        K_scale_target[1, :] *= self.image_size[0] / self.cfg.dataset.original_height
+        K_scale_target[0, :] *= self.image_size[1] / original_width
+        K_scale_target[1, :] *= self.image_size[0] / original_height
 
         # Scale the intrinsic matrix for the source image size (considering padding)
         K_scale_source = K.copy()
-        K_scale_source[0, 0] *= self.image_size[1] / self.cfg.dataset.original_width
-        K_scale_source[1, 1] *= self.image_size[0] / self.cfg.dataset.original_height
-        K_scale_source[0, 2] *= (self.image_size[1] + self.cfg.dataset.pad_border_aug * 2) / self.cfg.dataset.original_width
-        K_scale_source[1, 2] *= (self.image_size[0] + self.cfg.dataset.pad_border_aug * 2) / self.cfg.dataset.original_height
+        K_scale_source[0, 0] *= self.image_size[1] / original_width
+        K_scale_source[1, 1] *= self.image_size[0] / original_height
+        K_scale_source[0, 2] *= (self.image_size[1] + self.cfg.dataset.pad_border_aug * 2) / original_width
+        K_scale_source[1, 2] *= (self.image_size[0] + self.cfg.dataset.pad_border_aug * 2) / original_height
         
 
         # Compute the inverse of the scaled source intrinsic matrix
@@ -339,8 +341,8 @@ class scannetppDataset(Dataset):
             total_frame_num = len(src_and_tgt_frame_idxs)
             frame_names = list(range(total_frame_num))
 
-        have_depth = seq_key not in self._missing_scans
-
+        # have_depth = seq_key not in self._missing_scans
+        have_depth = True
         inputs = {}
 
         # Iterate over the frames and process each frame
@@ -349,18 +351,18 @@ class scannetppDataset(Dataset):
             c2w = pose_data['poses'][frame_idx]
             inputs_T_c2w = self.process_pose(c2w)
 
-            intrinsic = pose_data['intrinsics'][frame_idx]
-            inputs_K_tgt, inputs_K_src, inputs_inv_K_src = self.process_intrinsics(intrinsic)
-            
             # Process the image for the current frame
             img_name = pose_data['images'][frame_idx][:-4] + '.jpg'
             img_path =  self.dataset_folder / self.mode / seq_key / 'images' / img_name
-            inputs_color, inputs_color_aug = self.process_image(img_path)
+            inputs_color, inputs_color_aug, orig_size = self.process_image(img_path)
+
+            intrinsic = pose_data['intrinsics'][frame_idx]
+            inputs_K_tgt, inputs_K_src, inputs_inv_K_src = self.process_intrinsics(intrinsic, orig_size[1], orig_size[0])
 
             if have_depth:
                 depth_name = pose_data['images'][frame_idx][:-4] + '.png'
                 depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
-                inputs_depth = self.process_depth(depth_path)
+                depth = self.process_depth(depth_path)
 
             # Additional metadata
             first_img_name = pose_data['images'][0][:-4]  # The source frame
@@ -375,7 +377,16 @@ class scannetppDataset(Dataset):
             inputs[("T_c2w", frame_name)] = inputs_T_c2w
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
             if have_depth:
-                inputs[("depth", frame_name, 0)] = inputs_depth        
+                inputs[("depth_sparse", frame_name)] = depth
+
+            # T.functional.to_pil_image(inputs_color).save("/home/maoyucheng/code/GaussianAnything/debug_rgb.png")
+            # save_depth(depth, "/home/maoyucheng/code/GaussianAnything/debug_depth.png")
+            
+        #     pts3d_debug, _ = depthmap_to_absolute_camera_coordinates(depth.detach().cpu().numpy(), inputs_K_tgt.detach().cpu().numpy(), inputs_T_c2w.detach().cpu().numpy())
+        #     import numpy as np
+
+        #     storePly(f"/home/maoyucheng/code/GaussianAnything/debug_vis/pts3d_{frame_name}.ply", pts3d_debug.reshape(-1, 3), inputs_color.view(3, -1).T.detach().cpu().numpy()*255)
+        # breakpoint()
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 
@@ -417,3 +428,12 @@ class scannetppDataset(Dataset):
     #         'sky_mask': depthmap <= 0.0,
     #     }
     #     return view
+    
+if __name__ == "__main__":
+    
+    # from .loading_utils import read_extrinsics_binary, read_h5py, read_img
+    
+    dataset = ScannetppDataset(data_path="/scratch/bcdm/ymao3/scannetpp")
+    
+    for idx in np.random.permutation(len(dataset)):
+        data = dataset[idx]

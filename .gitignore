@@ -170,3 +170,22 @@ submodules/UniDepth/pretrained/pytorch_model.bin
 output/
 submodules/diff-gaussian-rasterization-w-pose
 note.txt
+
+# ignore these types
+*.pyc
+*.out
+*.log
+*.mexa64
+*.pdf
+*.tar
+*.out
+*.txt
+*.ipynb
+*.png
+*.jpg
+*.gif
+*.out
+*.yaml
+*.json
+*.ply
+*.tar.gz

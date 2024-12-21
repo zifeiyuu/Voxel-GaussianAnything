@@ -10,7 +10,7 @@ from IPython import embed
 import random
 
 class LinearHead(nn.Module):
-    def __init__(self, cfg, in_dims=[32]):
+    def __init__(self, cfg, in_dims=[32], xyz_scale=0.01, xyz_bias=0.0, scale_mul=1):
         super().__init__()
 
         self.cfg = cfg
@@ -35,7 +35,7 @@ class LinearHead(nn.Module):
             for feat_idx, (out_channel, scale, bias) in enumerate(zip(self.split_dimensions, scales, biases)):
                 # by default, the init for scale is the second one
                 if feat_idx == 1:
-                    bias += np.log(10 * inv_idx)
+                    bias += np.log(10 * inv_idx * scale_mul)
                 nn.init.xavier_uniform_(
                     gaussian_head.weight[start_channel:start_channel + out_channel, :], scale)
                 nn.init.constant_(
@@ -52,8 +52,8 @@ class LinearHead(nn.Module):
 
             # Offset parameters initialization
             for offset_head in self.offset_heads:
-                nn.init.xavier_uniform_(offset_head.weight[:, :], cfg.model.xyz_scale)
-                nn.init.constant_(offset_head.bias[:], cfg.model.xyz_bias)
+                nn.init.xavier_uniform_(offset_head.weight[:, :], xyz_scale)
+                nn.init.constant_(offset_head.bias[:], xyz_bias)
 
         self.gaussian_decoder = GaussianDecoder(cfg)
         self.parameters_to_train += [{"params": self.gaussian_decoder.parameters()}]
