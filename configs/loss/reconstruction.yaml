@@ -3,8 +3,8 @@ mse:
   type: l1
 
 ssim:
-  weight: 0.85
+  weight: 0.00
 
 lpips:
-  weight: 0.01
-  apply_after_step: 50000
+  weight: 0.25
+  apply_after_step: 1

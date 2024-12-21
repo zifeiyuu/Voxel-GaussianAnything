@@ -22,7 +22,7 @@ from datasets.data import process_projs, data_to_c2w, pil_loader, get_sparse_dep
 from datasets.tardataset import TarDataset
 from misc.localstorage import copy_to_local_storage, extract_tar, get_local_dir
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, depthmap_to_absolute_camera_coordinates
-from misc.visualise_3d import storePly # for debugging
+from misc.visualise_3d import storePly#, save_depth # for debugging
 
 from IPython import embed
 logger = logging.getLogger(__name__)
@@ -83,11 +83,12 @@ class scannetppDataset(Dataset):
             self.saturation = 0.2
             self.hue = 0.1
 
-        self.resize = {}
+        self.resize, self.depth_resize = {}, {}
         for i in range(self.num_scales):
             s = 2 ** i
             new_size = (self.image_size[0] // s, self.image_size[1] // s)
             self.resize[i] = T.Resize(new_size, interpolation=self.interp)
+            self.depth_resize[i] = T.Resize(new_size, interpolation=Image.NEAREST)
         
         # load dilation file
         self.dilation = cfg.dataset.dilation
@@ -279,24 +280,12 @@ class scannetppDataset(Dataset):
             return None
         if depthmap.ndim == 3:
             depthmap = cv2.cvtColor(depthmap, cv2.COLOR_BGR2RGB)
-        depthmap = depthmap.astype(np.float32)
-        depthmap = torch.tensor(depthmap, dtype=torch.float32)
-
-        H, W = depthmap.shape
-        x = torch.linspace(0, W - 1, W)
-        y = torch.linspace(0, H - 1, H)
-        xv, yv = torch.meshgrid(x, y, indexing="xy")  #  (H, W)
-
-        # Flatten coordinates and depth
-        xys = torch.stack([xv, yv], dim=-1).reshape(-1, 2)  # (H*W, 2)
-        depth = depthmap.view(-1, 1)  # (H*W, 1)
-
-        # Normalize pixel coordinates to range [-1, 1]
-        img_dim = torch.tensor([W, H], dtype=torch.float32).view(1, 2) 
-        xys_scaled = (xys / img_dim - 0.5) * 2  
-        xyd = torch.cat([xys_scaled, depth], dim=1) 
-
-        return xyd
+        depthmap = depthmap.astype(np.float32) / 1000
+        
+        depthmap_scale = self.to_tensor(depthmap)
+        depthmap_scale = self.depth_resize[0](depthmap_scale)
+       
+        return depthmap_scale.squeeze()
     
     def process_pose(self, c2w):
         inputs_T_c2w = torch.from_numpy(c2w)
@@ -373,7 +362,7 @@ class scannetppDataset(Dataset):
             if have_depth:
                 depth_name = pose_data['images'][frame_idx][:-4] + '.png'
                 depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
-                xyd = self.process_depth(depth_path)
+                depth = self.process_depth(depth_path)
 
             # Additional metadata
             first_img_name = pose_data['images'][0][:-4]  # The source frame
@@ -388,11 +377,16 @@ class scannetppDataset(Dataset):
             inputs[("T_c2w", frame_name)] = inputs_T_c2w
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
             if have_depth:
-                inputs[("depth_sparse", frame_name)] = torch.tensor(inputs_depth, dtype=torch.float32)
-            pts3d_debug, _ = depthmap_to_absolute_camera_coordinates(inputs_depth, intrinsic, inputs_T_c2w.detach().cpu().numpy())
-            import numpy as np
-            storePly(f"/home/maoyucheng/code/GaussianAnything/debug_vis/pts3d_{frame_name}.ply", pts3d_debug.reshape(-1, 3), np.ones_like(pts3d_debug).reshape(-1, 3))
-        breakpoint()
+                inputs[("depth_sparse", frame_name)] = depth
+
+            # T.functional.to_pil_image(inputs_color).save("/home/maoyucheng/code/GaussianAnything/debug_rgb.png")
+            # save_depth(depth, "/home/maoyucheng/code/GaussianAnything/debug_depth.png")
+            
+        #     pts3d_debug, _ = depthmap_to_absolute_camera_coordinates(depth.detach().cpu().numpy(), inputs_K_tgt.detach().cpu().numpy(), inputs_T_c2w.detach().cpu().numpy())
+        #     import numpy as np
+
+        #     storePly(f"/home/maoyucheng/code/GaussianAnything/debug_vis/pts3d_{frame_name}.ply", pts3d_debug.reshape(-1, 3), inputs_color.view(3, -1).T.detach().cpu().numpy()*255)
+        # breakpoint()
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 
