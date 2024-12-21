@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "scannetpp_base" # moge_multiscale_padding_lpips
+  exp_name: "scannetpp_base2" # moge_multiscale_padding_lpips
   file: "gat_config.yaml"
 
 data_loader:

@@ -49,6 +49,20 @@ def estimate_depth_scale(depth, sparse_depth):
     scale = (depth_pred.log() - z.log()).mean().exp()
     return scale
 
+def estimate_depth_scale_by_depthmap(depth, tgt_depth, max_depth=20):
+    """
+    depth: [1, 1, H, W]
+    tgt_depth: [H, W]
+    """
+
+    eps = 1e-3
+    device = depth.device
+    tgt_depth = tgt_depth.to(device)
+    
+    valid_mask = torch.logical_and((tgt_depth > eps), (tgt_depth < max_depth)).bool()
+    scale = depth.squeeze()[valid_mask].median() / tgt_depth[valid_mask].median()
+    return scale
+
 
 def estimate_depth_scale_ransac(depth, sparse_depth, num_iterations=1000, sample_size=5, threshold=0.1):
     best_scale = None

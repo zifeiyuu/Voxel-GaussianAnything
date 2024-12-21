@@ -9,7 +9,7 @@ from einops import rearrange
 from models.encoder.layers import BackprojectDepth
 from models.decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted, debug_vis_pointcloud
 from misc.util import add_source_frame_id
-from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
+from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, estimate_depth_scale_by_depthmap
 from IPython import embed
 from matplotlib import pyplot as plt
 import numpy as np
@@ -106,10 +106,11 @@ class BaseModel(nn.Module):
                 if ("scale_colmap", 0) in inputs.keys():
                     scale = inputs[("scale_colmap", 0)][k]
                 else:
-                    if self.is_train():
-                        scale = estimate_depth_scale(depth_k, sparse_depth_k)
-                    else:
-                        scale = estimate_depth_scale_ransac(depth_k, sparse_depth_k)
+                    # if self.is_train():
+                    #     scale = estimate_depth_scale(depth_k, sparse_depth_k)
+                    # else:
+                    #     scale = estimate_depth_scale_ransac(depth_k, sparse_depth_k)
+                    scale = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
                 scales.append(scale)
             scale = torch.tensor(scales, device=depth.device).unsqueeze(dim=1)
             outputs[("depth_scale", 0)] = scale

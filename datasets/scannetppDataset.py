@@ -386,7 +386,6 @@ class scannetppDataset(Dataset):
         #     import numpy as np
 
         #     storePly(f"/home/maoyucheng/code/GaussianAnything/debug_vis/pts3d_{frame_name}.ply", pts3d_debug.reshape(-1, 3), inputs_color.view(3, -1).T.detach().cpu().numpy()*255)
-        # breakpoint()
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 

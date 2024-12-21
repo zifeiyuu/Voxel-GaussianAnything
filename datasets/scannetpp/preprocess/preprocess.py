@@ -5,7 +5,7 @@
 # --------------------------------------------------------
 # Script to pre-process the scannet++ dataset.
 # Usage:
-# python3 datasets_preprocess/preprocess_scannetpp.py --scannetpp_dir /path/to/scannetpp --precomputed_pairs /path/to/scannetpp_pairs --pyopengl-platform egl
+# python3 datasets/scannetpp/preprocess/preprocess.py --scannetpp_dir /mnt/datasets/scannetpp/data_demo --output_dir /mnt/datasets/scannetpp/data_demo_processed --pyopengl-platform egl
 # --------------------------------------------------------
 import os
 import argparse
@@ -45,7 +45,6 @@ OPENGL_TO_OPENCV = np.float32([[1, 0, 0, 0],
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--scannetpp_dir', required=True)
-    parser.add_argument('--precomputed_pairs', required=True)
     parser.add_argument('--output_dir', default='data/scannetpp_processed')
     parser.add_argument('--target_resolution', default=920, type=int, help="images resolution")
     parser.add_argument('--pyopengl-platform', type=str, default='', help='PyOpenGL env variable')
@@ -180,23 +179,19 @@ def undistort_images(intrinsics, rgb, mask):
     return width, height, new_K, undistorted_image, undistorted_mask
 
 
-def process_scenes(root, pairsdir, output_dir, target_resolution):
+def process_scenes(root, output_dir, target_resolution):
     os.makedirs(output_dir, exist_ok=True)
 
     # default values from
     # https://github.com/scannetpp/scannetpp/blob/main/common/configs/render.yml
     znear = 0.05
     zfar = 20.0
-
-    listfile = osp.join(pairsdir, 'scene_list.json')
-    with open(listfile, 'r') as f:
-        scenes = json.load(f)
-
+    scenes = os.listdir(root)
     # for each of these, we will select some dslr images and some iphone images
     # we will undistort them and render their depth
     renderer = pyrender.OffscreenRenderer(0, 0)
     for scene in tqdm(scenes, position=0, leave=True):
-        data_dir = os.path.join(root, 'data', scene)
+        data_dir = os.path.join(root, scene)
         dir_dslr = os.path.join(data_dir, 'dslr')
         dir_iphone = os.path.join(data_dir, 'iphone')
         dir_scans = os.path.join(data_dir, 'scans')
@@ -209,8 +204,8 @@ def process_scenes(root, pairsdir, output_dir, target_resolution):
         if osp.isfile(scene_metadata_path):
             continue
 
-        pairs_dir_scene = os.path.join(pairsdir, scene)
-        pairs_dir_scene_selected_pairs = os.path.join(pairs_dir_scene, 'selected_pairs.npz')
+
+
         assert osp.isfile(pairs_dir_scene_selected_pairs)
         selected_npz = np.load(pairs_dir_scene_selected_pairs)
         selection, pairs = selected_npz['selection'], selected_npz['pairs']
@@ -389,6 +384,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.pyopengl_platform.strip():
         os.environ['PYOPENGL_PLATFORM'] = args.pyopengl_platform
-    process_scenes(args.scannetpp_dir, args.precomputed_pairs, args.output_dir, args.target_resolution)
+    process_scenes(args.scannetpp_dir, args.output_dir, args.target_resolution)
     
 # python3 datasets_preprocess/preprocess_scannetpp.py --scannetpp_dir /mnt/datasets/scannetpp --precomputed_pairs /path/to/scannetpp_pairs --pyopengl-platform egl
