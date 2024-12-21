@@ -88,6 +88,29 @@ class Trainer(nn.Module):
         
         return rec_loss
     
+    def compute_depth_loss(self, inputs, outputs):
+        cfg = self.cfg
+        frames = [0] + cfg.model.gauss_novel_frames
+        
+        def scale_invariant_depth_loss(pred, target):
+            pred_log = torch.log(pred)
+            target_log = torch.log(target)
+            
+            diff = pred_log - target_log
+            n = torch.numel(diff)
+            
+            loss = (diff ** 2).mean() - (diff.sum() ** 2) / (2 * n ** 2)
+            return loss
+        loss = 0.0
+        for frame in frames:
+
+            target, render = torch.stack(inputs[('depth_sparse', frame)]), outputs[('depth_gauss', frame, 0)].squeeze()
+            target = target.to(render.device)
+            mask = torch.logical_and((target > 1e-3), (target < 20)).bool()
+            
+            loss += scale_invariant_depth_loss(render[mask], target[mask])
+        return loss
+    
     def compute_losses(self, inputs, outputs, mask):
         """Compute the reprojection and smoothness losses for a minibatch
         """
@@ -119,17 +142,6 @@ class Trainer(nn.Module):
                 losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss
                 total_loss += small_g_lmbd * small_gauss_reg_loss
 
-                # mean_thresh_per_channel = cfg.loss.gauss_min_scale.mean_thresh
-                # total_gaussians = scaling.shape[1] * scaling.shape[3] 
-                # # Total threshold for all channels across all Gaussians
-                # total_threshold = (mean_thresh_per_channel * mean_thresh_per_channel) * 3 * total_gaussians
-                # squared_scaling = torch.square(scaling)  # Square each element
-                # sum_squares = torch.sum(squared_scaling, dim=2)  # Sum along the channel dimension
-                # total_scale = torch.sum(sum_squares)
-                # small_gauss_total_reg_loss = torch.relu(total_threshold - total_scale) 
-                # losses["loss/small_gauss_total_reg_loss"] = small_gauss_total_reg_loss
-                # total_loss += small_g_lmbd * small_gauss_total_reg_loss
-
             # regularize too big offset
             if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:
                 offset = outputs["gauss_offset"]
@@ -140,6 +152,15 @@ class Trainer(nn.Module):
                     big_offset_reg_loss = 0.0
                 losses["loss/gauss_offset_reg"] = big_offset_reg_loss
                 total_loss += offs_lmbd * big_offset_reg_loss
+                
+            # regularize cd
+            # if cfg.loss.soft_cd.weight > 0:
+            #     self.compute_cd_loss(inputs, outputs)
+            #     breakpoint()
+            if cfg.loss.gauss_depth.weight > 0:
+                depth_loss = self.compute_depth_loss(inputs, outputs)
+                losses["loss/depth_loss"] = depth_loss
+                total_loss += cfg.loss.gauss_depth.weight * depth_loss
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):

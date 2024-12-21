@@ -177,6 +177,54 @@ def depthmap_to_camera_coordinates(depthmap, camera_intrinsics, pseudo_focal=Non
     valid_mask = (depthmap > 0.0)
     return X_cam, valid_mask
 
+def depthmap_to_camera_coordinates_torch(depthmap, camera_intrinsics, pseudo_focal=None):
+    """
+    Convert a depth map to 3D camera coordinates.
+
+    Args:
+        - depthmap (HxW tensor): Depth map.
+        - camera_intrinsics (3x3 tensor): Camera intrinsic matrix.
+        - pseudo_focal (HxW tensor or None): Optional tensor of focal lengths, used if not available in intrinsics.
+
+    Returns:
+        - X_cam (HxWx3 tensor): Point map of absolute coordinates.
+        - valid_mask (HxW tensor): Mask specifying valid pixels.
+    """
+
+    
+    H, W = depthmap.shape
+
+    # Compute 3D ray associated with each pixel
+    # Strong assumption: there are no skew terms
+    assert camera_intrinsics[0, 1] == 0.0
+    assert camera_intrinsics[1, 0] == 0.0
+
+    if pseudo_focal is None:
+        fu = camera_intrinsics[0, 0]
+        fv = camera_intrinsics[1, 1]
+    else:
+        assert pseudo_focal.shape == (H, W)
+        fu = pseudo_focal
+        fv = pseudo_focal
+
+    cu = camera_intrinsics[0, 2]
+    cv = camera_intrinsics[1, 2]
+
+    # Create grid of pixel coordinates
+    u, v = torch.meshgrid(torch.arange(W, dtype=depthmap.dtype, device=depthmap.device), torch.arange(H, dtype=depthmap.dtype, device=depthmap.device), indexing='xy')
+    
+    z_cam = depthmap * camera_intrinsics[2, 2]
+    x_cam = (u - cu) * depthmap / fu
+    y_cam = (v - cv) * depthmap / fv
+    
+    # Stack to get the 3D coordinates
+    X_cam = torch.stack((x_cam, y_cam, z_cam), dim=-1)
+    
+    # Mask for valid coordinates
+    valid_mask = (depthmap > 0.0)
+    
+    return X_cam, valid_mask
+
 
 def depthmap_to_absolute_camera_coordinates(depthmap, camera_intrinsics, camera_pose, **kw):
     """

@@ -21,7 +21,7 @@ from datasets.scannetpp.masks import calculate_in_frustum_mask_single
 from datasets.data import process_projs, data_to_c2w, pil_loader, get_sparse_depth
 from datasets.tardataset import TarDataset
 from misc.localstorage import copy_to_local_storage, extract_tar, get_local_dir
-from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, depthmap_to_absolute_camera_coordinates
+from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, depthmap_to_camera_coordinates_torch
 from misc.visualise_3d import storePly#, save_depth # for debugging
 
 from IPython import embed
@@ -58,6 +58,8 @@ class scannetppDataset(Dataset):
         self.max_fov = cfg.dataset.max_fov
         self.interp = Image.LANCZOS
         # self.loader = pil_loader
+
+        self.have_pts = True if cfg.loss.soft_cd.weight > 0 else False
         self.to_tensor = T.ToTensor()
         # self.loader = pil_loader
         if cfg.dataset.normalize:
@@ -363,6 +365,10 @@ class scannetppDataset(Dataset):
                 depth_name = pose_data['images'][frame_idx][:-4] + '.png'
                 depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
                 depth = self.process_depth(depth_path)
+                
+            if self.have_pts:
+                cam_pts = depthmap_to_camera_coordinates_torch(depth, inputs_K_tgt)
+                
 
             # Additional metadata
             first_img_name = pose_data['images'][0][:-4]  # The source frame
@@ -378,14 +384,9 @@ class scannetppDataset(Dataset):
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
             if have_depth:
                 inputs[("depth_sparse", frame_name)] = depth
-
-            # T.functional.to_pil_image(inputs_color).save("/home/maoyucheng/code/GaussianAnything/debug_rgb.png")
-            # save_depth(depth, "/home/maoyucheng/code/GaussianAnything/debug_depth.png")
-            
-        #     pts3d_debug, _ = depthmap_to_absolute_camera_coordinates(depth.detach().cpu().numpy(), inputs_K_tgt.detach().cpu().numpy(), inputs_T_c2w.detach().cpu().numpy())
-        #     import numpy as np
-
-        #     storePly(f"/home/maoyucheng/code/GaussianAnything/debug_vis/pts3d_{frame_name}.ply", pts3d_debug.reshape(-1, 3), inputs_color.view(3, -1).T.detach().cpu().numpy()*255)
+                
+            if self.have_pts:
+                inputs[("cam_pts", frame_name)] = cam_pts
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 
