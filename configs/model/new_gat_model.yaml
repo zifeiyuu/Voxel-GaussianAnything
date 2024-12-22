@@ -13,9 +13,9 @@ voxel_size: 0.02
 donsample_ratio: 0.2
 
 # NOT USED
-selective_padding: false
-large_grad_threshold: 0.1
-edge_padding_pixel: 10
+selective_padding: true
+large_grad_threshold: 0.2
+edge_padding_pixel: 14
 
 use_decoder_3d: true
 normalize_before_decoder_3d: true
@@ -51,7 +51,7 @@ sh_scale: 1.0
 
 scale_lambda: 0.01
 depth_bias: -0.1
-xyz_bias: [0.0, 0.01, 0.02]
+xyz_bias: [0.0, 0.01, 0.0]
 opacity_bias: 0.1
 scale_bias: 0.02
 

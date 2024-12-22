@@ -398,19 +398,23 @@ class PointTransformerV3(PointModule):
 
         coords_outputs = []
         feats_outputs = []
+        batch_outputs = []
 
         if not self.cls_mode:
             if self.all_layer_output:
                 coords_outputs.append(point['coord'].clone())
                 feats_outputs.append(point['feat'].clone()) 
+                batch_outputs.append(point['batch'].clone()) 
                 for i, module in enumerate(self.dec):
                     point = module(point)  # Process the point object through the module
                     coords_outputs.append(point['coord'].clone())  # Extract and clone 'coord'
                     feats_outputs.append(point['feat'].clone()) 
+                    batch_outputs.append(point['batch'].clone()) 
             else:
                 point, multiscale_point = self.dec(point)
                 coords_outputs.append(point['coord'].clone())  # Extract and clone 'coord'
                 feats_outputs.append(point['feat'].clone()) 
+                batch_outputs.append(point['batch'].clone()) 
         # else:
         #     point.feat = torch_scatter.segment_csr(
         #         src=point.feat,
@@ -419,4 +423,4 @@ class PointTransformerV3(PointModule):
         #     )
         # List to store intermediate outputs
 
-        return coords_outputs, feats_outputs
+        return coords_outputs, feats_outputs, batch_outputs

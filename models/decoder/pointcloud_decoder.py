@@ -42,7 +42,7 @@ class PointTransformerDecoder(nn.Module):
 
         if self.version == 'v3':
             data_dict['grid_size'] = self.cfg.model.grid_size
-            coords, feats = self.transformer(data_dict)
+            coords, feats, batchs = self.transformer(data_dict)
             pts3d_list = []
             pts_feat_list = []
 
