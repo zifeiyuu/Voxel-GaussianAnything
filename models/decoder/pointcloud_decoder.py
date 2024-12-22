@@ -7,7 +7,7 @@ import copy
 from .pointnet_models.PTv1 import PointTransformerV1, PointTransformerV1_26, PointTransformerV1_38, PointTransformerV1_50
 from .pointnet_models.myPT import PointTransformerV2_x
 
-from .pointnet_models.PTv3 import PointTransformerV3Model
+
 
 from IPython import embed
 
@@ -22,6 +22,10 @@ class PointTransformerDecoder(nn.Module):
         kw.pop("name")
 
         if self.version == 'v3':
+            from .pointnet_models.PTv3 import PointTransformerV3Model
+            self.transformer =  PointTransformerV3Model(**kw)  
+        elif self.version == 'v3_padding':
+            from .pointnet_models.PTv3_padding import PointTransformerV3Model
             self.transformer =  PointTransformerV3Model(**kw)  
         else:
             self.transformer = PointTransformerV2_x(**kw)
@@ -40,7 +44,7 @@ class PointTransformerDecoder(nn.Module):
         offset = torch.cumsum(offset, dim=0)
         data_dict["offset"] = offset
 
-        if self.version == 'v3':
+        if self.version == 'v3' or self.version == 'v3_padding':
             data_dict['grid_size'] = self.cfg.model.grid_size
             coords, feats, batchs = self.transformer(data_dict)
             pts3d_list = []
