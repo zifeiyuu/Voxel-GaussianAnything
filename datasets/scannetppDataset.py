@@ -59,7 +59,6 @@ class scannetppDataset(Dataset):
         self.interp = Image.LANCZOS
         # self.loader = pil_loader
 
-        self.have_pts = True if cfg.loss.soft_cd.weight > 0 else False
         self.to_tensor = T.ToTensor()
         # self.loader = pil_loader
         if cfg.dataset.normalize:
@@ -366,8 +365,6 @@ class scannetppDataset(Dataset):
                 depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
                 depth = self.process_depth(depth_path)
                 
-            if self.have_pts:
-                cam_pts = depthmap_to_camera_coordinates_torch(depth, inputs_K_tgt)
                 
 
             # Additional metadata
@@ -384,9 +381,7 @@ class scannetppDataset(Dataset):
             inputs[("T_w2c", frame_name)] = torch.linalg.inv(inputs_T_c2w)
             if have_depth:
                 inputs[("depth_sparse", frame_name)] = depth
-                
-            if self.have_pts:
-                inputs[("cam_pts", frame_name)] = cam_pts
+
         if not self.is_train:
             inputs[("total_frame_num", 0)] = total_frame_num
 

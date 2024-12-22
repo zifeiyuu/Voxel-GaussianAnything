@@ -54,3 +54,8 @@ depth_bias: -0.1
 xyz_bias: [0.0, 0.01, 0.02]
 opacity_bias: 0.1
 scale_bias: 0.02
+
+
+# point parameters
+point_head_scale: 1e-2
+point_head_bias: 0.0

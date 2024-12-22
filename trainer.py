@@ -9,8 +9,10 @@ from pathlib import Path
 
 from models.model import GaussianPredictor
 from torchmetrics.image import LearnedPerceptualImagePatchSimilarity
-from misc.depth import normalize_depth_for_display
+from misc.depth import normalize_depth_for_display, depthmap_to_camera_coordinates_torch
 from misc.util import sec_to_hm_str
+from misc.visualise_3d import storePly
+from chamferdist import ChamferDistance
 
 from models.encoder.layers import SSIM
 from evaluate import evaluate, get_model_instance
@@ -111,6 +113,42 @@ class Trainer(nn.Module):
             loss += scale_invariant_depth_loss(render[mask], target[mask])
         return loss
     
+    def compute_cd_loss(self, inputs, outputs):
+        cfg = self.cfg
+        eps = 1e-3
+
+        frames = [0] + cfg.model.gauss_novel_frames
+        recon_pts = outputs['recon_pts']
+        cd, chamferDistance = 0.0, ChamferDistance()
+        for bs, scale in enumerate(outputs[('depth_scale', 0)]):
+            # step1: use the aligned depth map to get the pointcloud
+            scene_pts = []
+            scene_recon_pts = recon_pts[bs].squeeze().T
+            for frame in frames:
+                depth, K = inputs[('depth_sparse', frame)][bs].cuda() * scale, inputs[('K_tgt', frame)][bs]
+
+                valid_mask = torch.logical_and((depth > eps), (depth < 20.0)).bool()
+                pts3d, _ = depthmap_to_camera_coordinates_torch(depth, K)
+                pts3d = pts3d[valid_mask]
+                if frame != 0:
+                    c2w = outputs[('cam_T_cam', frame, 0)][bs]
+                    pts3d_homo = torch.cat([pts3d, torch.ones_like(pts3d)[..., 0: 1]], dim=-1)
+                    pts3d = (c2w @ pts3d_homo.T).T[..., :3]
+                    
+                scene_pts.append(pts3d)
+
+            scene_pts = torch.cat(scene_pts) 
+            # no bidirection here, cd should have direction
+            cd += chamferDistance(scene_recon_pts.unsqueeze(0), scene_pts.unsqueeze(0))
+            
+            # can do sanity check by uncomment these, they should align in the same coords
+            # storePly("/home/maoyucheng/code/GaussianAnything2/debug.ply", scene_pts.detach().cpu().numpy(), torch.ones_like(scene_pts).detach().cpu().numpy())
+            # storePly("/home/maoyucheng/code/GaussianAnything2/debug_recon.ply", scene_recon_pts.detach().cpu().numpy(), torch.ones_like(scene_recon_pts).detach().cpu().numpy())
+            
+        return cd
+
+
+    
     def compute_losses(self, inputs, outputs, mask):
         """Compute the reprojection and smoothness losses for a minibatch
         """
@@ -154,9 +192,11 @@ class Trainer(nn.Module):
                 total_loss += offs_lmbd * big_offset_reg_loss
                 
             # regularize cd
-            # if cfg.loss.soft_cd.weight > 0:
-            #     self.compute_cd_loss(inputs, outputs)
-            #     breakpoint()
+            if cfg.loss.soft_cd.weight > 0:
+                cd_loss = self.compute_cd_loss(inputs, outputs)
+                losses["loss/gauss_offset_reg"] = cd_loss
+                total_loss += cfg.loss.soft_cd.weight * big_offset_reg_loss
+
             if cfg.loss.gauss_depth.weight > 0:
                 depth_loss = self.compute_depth_loss(inputs, outputs)
                 losses["loss/depth_loss"] = depth_loss

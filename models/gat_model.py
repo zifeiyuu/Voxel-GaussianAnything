@@ -66,6 +66,12 @@ class GATModel(BaseModel):
             LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale[i], xyz_bias=cfg.model.xyz_bias[i])
             for i in range(cfg.model.overall_padding)
         ])
+        
+        # init a point decoder for compute point offset
+        if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
+            self.decoder_point = nn.Linear(self.decoder_3d.transformer.out_dim[0] + 3, 3)
+            nn.init.xavier_uniform_(self.decoder_point.weight, cfg.model.point_head_scale)
+            nn.init.constant_(self.decoder_point.bias, cfg.model.point_head_bias)
 
         if self.cfg.model.selective_padding:
             self.decoder_gs.append(
@@ -133,6 +139,9 @@ class GATModel(BaseModel):
 
             #simple approach## only one decoder
             outputs = self.decoder_gs[0](pts_feat)
+            
+        if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
+            point_offset = self.decoder_point(torch.cat([pts3d, pts_feat[-1]], dim=-1)) 
 
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         if self.use_decoder_3d and self.normalize_before_decoder_3d:
@@ -148,6 +157,10 @@ class GATModel(BaseModel):
 
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         outputs["gauss_means"] = pts3d_reshape
+
+        if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
+            outputs["recon_pts"] = pts3d_reshape + rearrange(point_offset, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
+            
         outputs[("depth", 0)] = pts_depth_origin
 
         if cfg.model.gaussian_rendering:
