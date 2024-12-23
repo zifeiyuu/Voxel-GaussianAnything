@@ -44,7 +44,7 @@ class PointTransformerDecoder(nn.Module):
         offset = torch.cumsum(offset, dim=0)
         data_dict["offset"] = offset
 
-        if self.version == 'v3' or self.version == 'v3_padding':
+        if self.version == 'v3':
             data_dict['grid_size'] = self.cfg.model.grid_size
             coords, feats, batchs = self.transformer(data_dict)
             pts3d_list = []
@@ -59,7 +59,24 @@ class PointTransformerDecoder(nn.Module):
                 pts_feat_list.append(pts_feat)
 
             return pts3d_list, pts_feat_list
-        
+        elif self.version == 'v3_padding':
+            data_dict['grid_size'] = self.cfg.model.grid_size
+            (coords, feats, batchs), (feats_padded, batchs_padded) = self.transformer(data_dict)
+            pts3d_list = []
+            pts_feat_list, pts_feat_padded_list = [], []
+
+            for pts3d, pts_feat, pts_feat_padded in zip(coords, feats, feats_padded):
+                # Reshape and add to lists
+                pts3d = rearrange(pts3d, "(B N) C -> B N C", B=B)
+                pts_feat = rearrange(pts_feat, "(B N) C -> B N C", B=B)
+                # breakpoint()
+                pts_feat_padded = rearrange(pts_feat_padded, "(B N) C -> B N C", B=B)
+
+                pts3d_list.append(pts3d)
+                pts_feat_list.append(pts_feat)
+                pts_feat_padded_list.append(pts_feat_padded)
+
+            return pts3d_list, pts_feat_list, pts_feat_padded_list
         else:
         # forward through PointTransformer
             pts3d, pts_feat, offsets = self.transformer(data_dict)

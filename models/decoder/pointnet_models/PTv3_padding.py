@@ -5,7 +5,7 @@ from pointcept.models.utils.structure import Point
 from addict import Dict
 import torch_scatter
 import torch
-
+import copy
 
 from functools import partial
 from addict import Dict
@@ -387,8 +387,12 @@ class PointTransformerV3(PointModule):
                         name=f"block{i}",
                     )
                 self.dec.add(module=dec, name=f"dec{s}")
+                
+        # padding models
+        self.dec_padding = copy.deepcopy(self.dec)
 
     def forward(self, data_dict):
+
         point = Point(data_dict)
         point.serialization(order=self.order, shuffle_orders=self.shuffle_orders)
         self.skip = point['skip']
@@ -398,26 +402,31 @@ class PointTransformerV3(PointModule):
 
         coords_outputs = []
         feats_outputs = []
-        breakpoint()
+        batch_outputs = []
+
         if not self.cls_mode:
             if self.all_layer_output:
                 coords_outputs.append(point['coord'].clone())
                 feats_outputs.append(point['feat'].clone()) 
-                breakpoint()
+                batch_outputs.append(point['batch'].clone()) 
                 for i, module in enumerate(self.dec):
                     point = module(point)  # Process the point object through the module
                     coords_outputs.append(point['coord'].clone())  # Extract and clone 'coord'
                     feats_outputs.append(point['feat'].clone()) 
+                    batch_outputs.append(point['batch'].clone()) 
             else:
+                mid_point_data_dict = {}
+                for key, value in point.items():
+                    mid_point_data_dict[key] = value
+                mid_point = Point(mid_point_data_dict)
+                
                 point, multiscale_point = self.dec(point)
                 coords_outputs.append(point['coord'].clone())  # Extract and clone 'coord'
                 feats_outputs.append(point['feat'].clone()) 
-        # else:
-        #     point.feat = torch_scatter.segment_csr(
-        #         src=point.feat,
-        #         indptr=nn.functional.pad(point.offset, (1, 0)),
-        #         reduce="mean",
-        #     )
-        # List to store intermediate outputs
+                batch_outputs.append(point['batch'].clone()) 
+                
+                padded_point, _ = self.dec_padding(mid_point)
+                
 
-        return coords_outputs, feats_outputs
+
+        return (coords_outputs, feats_outputs, batch_outputs), ([padded_point['feat'].clone()], [padded_point['batch'].clone()])

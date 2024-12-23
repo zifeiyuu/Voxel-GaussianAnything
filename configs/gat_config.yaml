@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "+cdloss+padding_small" # moge_multiscale_padding_lpips
+  exp_name: "padding_cdloss" # moge_multiscale_padding_lpips
   file: "gat_config.yaml"
 
 data_loader:
@@ -29,7 +29,7 @@ optimiser:
   num_epochs: 1
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 2
+  accumulation_steps: 4
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0

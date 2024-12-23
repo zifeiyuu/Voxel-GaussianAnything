@@ -123,7 +123,7 @@ class Trainer(nn.Module):
         for bs, scale in enumerate(outputs[('depth_scale', 0)]):
             # step1: use the aligned depth map to get the pointcloud
             scene_pts = []
-            scene_recon_pts = recon_pts[bs].squeeze().T
+            scene_recon_pts = recon_pts[bs].squeeze()
             for frame in frames:
                 depth, K = inputs[('depth_sparse', frame)][bs].cuda() * scale, inputs[('K_tgt', frame)][bs]
 
@@ -194,8 +194,8 @@ class Trainer(nn.Module):
             # regularize cd
             if cfg.loss.soft_cd.weight > 0:
                 cd_loss = self.compute_cd_loss(inputs, outputs)
-                losses["loss/gauss_offset_reg"] = cd_loss
-                total_loss += cfg.loss.soft_cd.weight * big_offset_reg_loss
+                losses["loss/cd_loss"] = cd_loss
+                total_loss += cfg.loss.soft_cd.weight * cd_loss
 
             if cfg.loss.gauss_depth.weight > 0:
                 depth_loss = self.compute_depth_loss(inputs, outputs)

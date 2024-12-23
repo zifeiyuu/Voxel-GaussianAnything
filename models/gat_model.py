@@ -36,6 +36,27 @@ def to_device(inputs, device):
             inputs[key] = ipt.to(device)
     return inputs
 
+class MLP(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden_channels=None,
+        out_channels=None,
+        act_layer=nn.GELU,
+    ):
+        super().__init__()
+        out_channels = out_channels or in_channels
+        hidden_channels = hidden_channels or in_channels
+        self.fc1 = nn.Linear(in_channels, hidden_channels)
+        self.act = act_layer()
+        self.fc2 = nn.Linear(hidden_channels, out_channels)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.fc2(x)
+        return x
+
 class GATModel(BaseModel):
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -62,27 +83,25 @@ class GATModel(BaseModel):
             self.parameters_to_train += self.decoder_3d.get_parameter_groups()
             head_in_dim = self.decoder_3d.transformer.out_dim
 
-        self.decoder_gs = nn.ModuleList([
-            LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale[i], xyz_bias=cfg.model.xyz_bias[i])
-            for i in range(cfg.model.overall_padding)
-        ])
-        
+        self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
+
         # init a point decoder for compute point offset
         if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
             self.decoder_point = nn.Linear(self.decoder_3d.transformer.out_dim[-1] + 3, 3)
             nn.init.xavier_uniform_(self.decoder_point.weight, cfg.model.point_head_scale)
             nn.init.constant_(self.decoder_point.bias, cfg.model.point_head_bias)
 
-        if self.cfg.model.selective_padding:
-            self.decoder_gs.append(
-                LinearHead(cfg, [head_in_dim[-1]], xyz_scale=cfg.model.xyz_scale[-1], xyz_bias=cfg.model.xyz_bias[-1],  scale_mul=2) #want big gaussian
-            )
-        # Collect parameters from all decoders
-        for decoder in self.decoder_gs:
-            self.parameters_to_train += decoder.get_parameter_groups()
+        self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
         self.use_checkpoint = False
         self.use_reentrant = False
+        
+        # prepare modules for padding 
+        self.padding_offset = MLP(in_channels=self.decoder_3d.transformer.out_dim[-1] + 3, hidden_channels=self.decoder_3d.transformer.out_dim[-1]//2, out_channels=3)
+        self.decoder_gs_padding = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
+        
+        self.parameters_to_train += self.decoder_gs_padding.get_parameter_groups()
+        self.parameters_to_train += [{"params": self.padding_offset.parameters()}]
 
     def forward(self, inputs):
         cfg = self.cfg
@@ -102,34 +121,13 @@ class GATModel(BaseModel):
                 pts3d = (pts3d_origin - mean) / (z_median + 1e-6) # (B, N, 3)
             else:
                 pts3d = pts3d_origin
+            if "v3_padding" == self.decoder_3d.version:
+                pts3d, pts_feat, pts_feat_padded = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
+            else:
+                pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
 
-            pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
-            # apply padding at my selected place
-            if self.cfg.model.selective_padding:
-                B, _, _ = pts3d[-1].shape
-                assert B == 1, "This function only supports single batch input now"
-                mask_flattened = padding_select.view(-1)  # (B, H*W)
-                valid_indices = mask_flattened.nonzero(as_tuple=False).squeeze(-1)  # (N,)
-
-                padded_pts3d = pts3d[-1][0, valid_indices, :].unsqueeze(0)  # (1, N, 3)
-                padded_pts_feat = [pts_feat[-1][0, valid_indices, :].unsqueeze(0)]  # (1, N, D)
-
-            origin_pts3d = pts3d[-1]
             pts3d = torch.cat(pts3d, dim=1)
-
-            outputs_list = []
-            pts3d_list = []
-            for i in range(cfg.model.overall_padding):
-                pts3d_list.append(pts3d)
-                decoder_output = self.decoder_gs[i](pts_feat) 
-                outputs_list.append(decoder_output)
-            if self.cfg.model.selective_padding:
-                pts3d_list.append(padded_pts3d)
-                decoder_output = self.decoder_gs[-1](padded_pts_feat) 
-                outputs_list.append(decoder_output)
-            
-            pts3d = torch.cat(pts3d_list, dim=1)
-            outputs = {key: torch.cat([output[key] for output in outputs_list], dim=-1) for key in outputs_list[0]}
+            outputs = self.decoder_gs(pts_feat) 
 
         else:
             mean = pts3d_origin.mean(dim=1, keepdim=True) # (B, 1, 3)
@@ -140,19 +138,26 @@ class GATModel(BaseModel):
             #simple approach## only one decoder
             outputs = self.decoder_gs[0](pts_feat)
 
-        if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
-            offset_3d = origin_pts3d
-            offset_feat = pts_feat[-1]
-            if self.cfg.model.selective_padding:
-                offset_3d = torch.cat([offset_3d, padded_pts3d],dim=1)
-                offset_feat = torch.cat([offset_feat, padded_pts_feat[0]], dim=1)
-            # i dont know how to add multicale feature here, since dim is different######
-            point_offset = self.decoder_point(torch.cat([offset_3d, offset_feat], dim=-1)) 
+        # We compute padding offset here
+        if "v3_padding" == self.decoder_3d.version:
+            
+            padding_offset = self.padding_offset(torch.cat([pts_feat_padded[0], pts3d], dim=-1))
+            outputs_padding = self.decoder_gs(pts_feat_padded) 
+            
 
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         if self.use_decoder_3d and self.normalize_before_decoder_3d:
             # denormalize
             pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
+            
+        # Now, merge all the features here
+        if "v3_padding" == self.decoder_3d.version:
+            pts3d_padded = pts3d + padding_offset
+            pts3d = torch.cat([pts3d, pts3d_padded], dim=1)
+            for key, value in outputs.items():
+                outputs[key] = torch.cat([value, outputs_padding[key]], dim=-1)
+                
+            outputs["recon_pts"] = pts3d
 
         #offset after normalize
         if cfg.model.predict_offset:
@@ -164,8 +169,6 @@ class GATModel(BaseModel):
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         outputs["gauss_means"] = pts3d_reshape
 
-        if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
-            outputs["recon_pts"] = rearrange(point_offset+offset_3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
             
         outputs[("depth", 0)] = pts_depth_origin
 
