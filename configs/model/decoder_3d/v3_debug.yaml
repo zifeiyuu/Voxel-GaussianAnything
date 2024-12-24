@@ -23,7 +23,7 @@
 
 name: v3_debug
 
-in_channels: 35
+in_channels: 64
 enable_flash: True
 enc_dim: 64
 # output_dim: 

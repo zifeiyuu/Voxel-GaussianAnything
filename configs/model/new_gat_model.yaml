@@ -21,7 +21,7 @@ use_decoder_3d: true
 normalize_before_decoder_3d: true
 grid_size: 0.01
 
-version: v3_padding
+version: v3
 
 min_depth: 0.1
 max_depth: 20

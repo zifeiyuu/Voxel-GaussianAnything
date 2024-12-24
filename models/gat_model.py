@@ -11,6 +11,7 @@ from .encoder.layers import BackprojectDepth
 from .encoder.dust3r_encoder import Dust3rEncoder
 from .encoder.rgb_unidepth_encoder import Rgb_unidepth_Encoder
 from .encoder.moge_encoder import MoGe_Encoder
+from .encoder.voxel_encoder import prepare_hard_vfe_inputs_scatter_fast, HardVFE
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from .base_model import BaseModel
 from .heads.gat_head import LinearHead
@@ -75,6 +76,10 @@ class GATModel(BaseModel):
             
         self.parameters_to_train += self.encoder.get_parameter_groups()
         head_in_dim = [cfg.model.backbone.pts_feat_dim]
+        
+        self.vfe = HardVFE(in_channels=32+3+3, feat_channels=[64, 64], voxel_size=(0.02, 0.02, 0.02), point_cloud_range=(-2, -2, 0, 2, 2, 10))
+        self.parameters_to_train += [{"params": self.vfe.parameters()}]
+
 
         self.use_decoder_3d = cfg.model.use_decoder_3d
         if self.use_decoder_3d:
@@ -96,12 +101,6 @@ class GATModel(BaseModel):
         self.use_checkpoint = False
         self.use_reentrant = False
         
-        # prepare modules for padding 
-        self.padding_offset = MLP(in_channels=self.decoder_3d.transformer.out_dim[-1] + 3, hidden_channels=self.decoder_3d.transformer.out_dim[-1]//2, out_channels=3)
-        self.decoder_gs_padding = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
-        
-        self.parameters_to_train += self.decoder_gs_padding.get_parameter_groups()
-        self.parameters_to_train += [{"params": self.padding_offset.parameters()}]
 
     def forward(self, inputs):
         cfg = self.cfg
@@ -112,19 +111,28 @@ class GATModel(BaseModel):
 
         if cfg.model.pre_downsample:
             pts3d_origin, pts_feat, pts_rgb = random_droping(pts3d_origin, pts_feat, pts_rgb, cfg.model.donsample_ratio)
+        # Warning!!!!!! this code only support bs=1
+        for b in range(pts3d_origin.shape[0]):
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts3d_origin[b], pts_feat[b], pts_rgb[b], point_cloud_range=(-5, -5, 0, 5, 5, 20))
+
+            # storePly("/home/maoyucheng/code/GaussianAnything2/debug_vox.ply", voxel_centers.detach().cpu(), torch.zeros_like(voxel_centers).detach().cpu())
+            # storePly("/home/maoyucheng/code/GaussianAnything2/debug.ply", pts3d_origin[b].detach().cpu(), torch.zeros_like(pts3d_origin[b]).detach().cpu())
+            # breakpoint()
+            voxels_features = self.vfe(features, num_points, coors)
+            
+        # Warning!!!!!! Manually unsqueeze the btach size dim
+        voxel_centers = voxel_centers.unsqueeze(0)
+        voxels_features = voxels_features.unsqueeze(0)
 
         if self.use_decoder_3d:
             if self.normalize_before_decoder_3d:
                 # normalize points in each batch
-                mean = pts3d_origin.mean(dim=1, keepdim=True) # (B, 1, 3)
-                z_median = torch.median(pts3d_origin[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
-                pts3d = (pts3d_origin - mean) / (z_median + 1e-6) # (B, N, 3)
+                mean = voxel_centers.mean(dim=1, keepdim=True) # (B, 1, 3)
+                z_median = torch.median(voxel_centers[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
+                pts3d = (voxel_centers - mean) / (z_median + 1e-6) # (B, N, 3)
             else:
-                pts3d = pts3d_origin
-            if "v3_padding" == self.decoder_3d.version:
-                pts3d, pts_feat, pts_feat_padded = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
-            else:
-                pts3d, pts_feat = self.decoder_3d(pts3d, torch.cat([pts_rgb, pts_feat], dim=-1))
+                pts3d = voxel_centers
+            pts3d, pts_feat = self.decoder_3d(pts3d, voxels_features)
 
             pts3d = torch.cat(pts3d, dim=1)
             outputs = self.decoder_gs(pts_feat) 
@@ -137,28 +145,12 @@ class GATModel(BaseModel):
 
             #simple approach## only one decoder
             outputs = self.decoder_gs[0](pts_feat)
-
-        # We compute padding offset here
-        if "v3_padding" == self.decoder_3d.version:
-            
-            padding_offset = self.padding_offset(torch.cat([pts_feat_padded[0], pts3d], dim=-1))
-            outputs_padding = self.decoder_gs(pts_feat_padded) 
             
 
         # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
         if self.use_decoder_3d and self.normalize_before_decoder_3d:
             # denormalize
             pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
-            
-        # Now, merge all the features here
-        if "v3_padding" == self.decoder_3d.version:
-            pts3d_padded = pts3d + padding_offset
-            pts3d = torch.cat([pts3d, pts3d_padded], dim=1)
-            for key, value in outputs.items():
-                outputs[key] = torch.cat([value, outputs_padding[key]], dim=-1)
-                
-            outputs["recon_pts"] = pts3d
-
         #offset after normalize
         if cfg.model.predict_offset:
             for i in range(cfg.model.overall_padding):
