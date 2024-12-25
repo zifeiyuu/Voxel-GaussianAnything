@@ -77,7 +77,7 @@ class GATModel(BaseModel):
         self.parameters_to_train += self.encoder.get_parameter_groups()
         head_in_dim = [cfg.model.backbone.pts_feat_dim]
         
-        self.vfe = HardVFE(in_channels=32+3+3, feat_channels=[64, 64], voxel_size=(0.02, 0.02, 0.02), point_cloud_range=(-2, -2, 0, 2, 2, 10))
+        self.vfe = HardVFE(in_channels=32+3+3, feat_channels=[64, 64], voxel_size=(0.02, 0.02, 0.02), point_cloud_range=(-5, -5, 0, 5, 5, 20))
         self.parameters_to_train += [{"params": self.vfe.parameters()}]
 
 
@@ -91,10 +91,22 @@ class GATModel(BaseModel):
         self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
 
         # init a point decoder for compute point offset
-        if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
-            self.decoder_point = nn.Linear(self.decoder_3d.transformer.out_dim[-1] + 3, 3)
-            nn.init.xavier_uniform_(self.decoder_point.weight, cfg.model.point_head_scale)
-            nn.init.constant_(self.decoder_point.bias, cfg.model.point_head_bias)
+        # if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
+        #     self.decoder_point = nn.Linear(self.decoder_3d.transformer.out_dim[-1] + 3, 3)
+        #     nn.init.xavier_uniform_(self.decoder_point.weight, cfg.model.point_head_scale)
+        #     nn.init.constant_(self.decoder_point.bias, cfg.model.point_head_bias)
+            
+        self.point_pre_voxle = 2
+        self.point_offset = nn.ModuleList([MLP(self.decoder_3d.transformer.out_dim[-1], out_channels=3) for _ in range(self.point_pre_voxle)])
+        self.predict_feature = nn.ModuleList([MLP(self.decoder_3d.transformer.out_dim[-1]) for _ in range(self.point_pre_voxle)])
+        
+        for mlp in self.point_offset:
+            nn.init.constant_(mlp.fc2.weight, 0)
+            nn.init.constant_(mlp.fc2.bias, 0)
+            
+        self.parameters_to_train += [{"params": self.point_offset.parameters()}]
+        self.parameters_to_train += [{"params": self.predict_feature.parameters()}]
+        
 
         self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
@@ -132,25 +144,25 @@ class GATModel(BaseModel):
                 pts3d = (voxel_centers - mean) / (z_median + 1e-6) # (B, N, 3)
             else:
                 pts3d = voxel_centers
-            pts3d, pts_feat = self.decoder_3d(pts3d, voxels_features)
-
-            pts3d = torch.cat(pts3d, dim=1)
-            outputs = self.decoder_gs(pts_feat) 
-
-        else:
-            mean = pts3d_origin.mean(dim=1, keepdim=True) # (B, 1, 3)
-            z_median = torch.median(pts3d_origin[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
-            pts3d_normed = (pts3d_origin - mean) / (z_median + 1e-6) # (B, N, 3)
-            pts3d = pts3d_origin
-
-            #simple approach## only one decoder
-            outputs = self.decoder_gs[0](pts_feat)
+            pts3d_ori, pts_feat_ori = self.decoder_3d(pts3d, voxels_features)
             
+            # WARNING!!! No multiscale gaussian here!!
+            # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
+            if self.use_decoder_3d and self.normalize_before_decoder_3d:
+                # denormalize
+                pts3d_ori = pts3d_ori[-1] * (z_median + 1e-6) + mean # (B, N, 3)
+            
+            recon_pts = pts3d_ori.clone()
+            pts3d, pts_feat = [], []
+            for i in range(self.point_pre_voxle):
+                pts3d.append(pts3d_ori[-1] + self.point_offset[i](pts_feat_ori[-1]))
+                pts_feat.append(self.predict_feature[i](pts_feat_ori[-1]))
 
-        # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
-        if self.use_decoder_3d and self.normalize_before_decoder_3d:
-            # denormalize
-            pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
+            pts3d, pts_feat = torch.cat(pts3d, dim=1), torch.cat(pts_feat, dim=1)
+
+            outputs = self.decoder_gs([pts_feat]) 
+
+            
         #offset after normalize
         if cfg.model.predict_offset:
             for i in range(cfg.model.overall_padding):
@@ -161,6 +173,8 @@ class GATModel(BaseModel):
         pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
         outputs["gauss_means"] = pts3d_reshape
 
+        if cfg.loss.soft_cd.weight > 0:
+            outputs["recon_pts"] = recon_pts
             
         outputs[("depth", 0)] = pts_depth_origin
 

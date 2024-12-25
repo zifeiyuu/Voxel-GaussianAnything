@@ -12,7 +12,7 @@ gauss_offset:
   thresh: 1.0
 
 soft_cd:
-  weight: -1 # 1e-6
+  weight: 1e-7 # 1e-6
 
 gauss_depth:
   weight: -1
