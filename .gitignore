@@ -167,7 +167,7 @@ cython_debug/
 experiments_out
 exp/
 submodules/UniDepth/pretrained/pytorch_model.bin
-output/
+output
 submodules/diff-gaussian-rasterization-w-pose
 note.txt
 
