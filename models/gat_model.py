@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from pathlib import Path
 from einops import rearrange
+import collections
 
 from .encoder.layers import BackprojectDepth
 from .encoder.dust3r_encoder import Dust3rEncoder
@@ -77,7 +78,7 @@ class GATModel(BaseModel):
         self.parameters_to_train += self.encoder.get_parameter_groups()
         head_in_dim = [cfg.model.backbone.pts_feat_dim]
         
-        self.vfe = HardVFE(in_channels=32+3+3, feat_channels=[64, 64], voxel_size=(0.02, 0.02, 0.02), point_cloud_range=(-5, -5, 0, 5, 5, 20))
+        self.vfe = HardVFE(in_channels=32+3+3, feat_channels=[64, 64], voxel_size=(0.02, 0.02, 0.02), point_cloud_range=(-2, -2, 0, 2, 2, 10))
         self.parameters_to_train += [{"params": self.vfe.parameters()}]
 
 
@@ -91,27 +92,59 @@ class GATModel(BaseModel):
         self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
 
         # init a point decoder for compute point offset
-        # if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
-        #     self.decoder_point = nn.Linear(self.decoder_3d.transformer.out_dim[-1] + 3, 3)
-        #     nn.init.xavier_uniform_(self.decoder_point.weight, cfg.model.point_head_scale)
-        #     nn.init.constant_(self.decoder_point.bias, cfg.model.point_head_bias)
-            
-        self.point_pre_voxle = 2
-        self.point_offset = nn.ModuleList([MLP(self.decoder_3d.transformer.out_dim[-1], out_channels=3) for _ in range(self.point_pre_voxle)])
-        self.predict_feature = nn.ModuleList([MLP(self.decoder_3d.transformer.out_dim[-1]) for _ in range(self.point_pre_voxle)])
-        
-        for mlp in self.point_offset:
-            nn.init.constant_(mlp.fc2.weight, 0)
-            nn.init.constant_(mlp.fc2.bias, 0)
-            
-        self.parameters_to_train += [{"params": self.point_offset.parameters()}]
-        self.parameters_to_train += [{"params": self.predict_feature.parameters()}]
-        
+        if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
+            self.decoder_point = nn.Linear(self.decoder_3d.transformer.out_dim[-1] + 3, 3)
+            nn.init.xavier_uniform_(self.decoder_point.weight, cfg.model.point_head_scale)
+            nn.init.constant_(self.decoder_point.bias, cfg.model.point_head_bias)
 
         self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
         self.use_checkpoint = False
         self.use_reentrant = False
+        
+    def padding_dummy_gaussians(self, outputs):
+        # This func is using for padding dummy gaussian for batchify the rendering process
+        # we padd a very far away gaussians with 0 opacity, try not to affect the rendering process, although it might be little slow
+        gaussian_num = []
+        for output in outputs:
+            dtype, device = output["gauss_scaling"].dtype, output["gauss_scaling"].device
+            gaussian_num.append(output["gauss_scaling"].shape[-1])
+            
+        max_num_gaussians = max(gaussian_num)
+        batchify_output = collections.defaultdict(list)
+        for output in outputs:
+            if output["gauss_scaling"].shape[-1] == max_num_gaussians:
+                for key, value in output.items():
+                    batchify_output[key].append(value)
+                continue
+            for key, value in output.items():
+                # for opacity, we should padding gaussians 
+
+                padding_num = abs(output["gauss_scaling"].shape[-1] - max_num_gaussians)
+                if key == 'gauss_opacity':
+                    padding_element = torch.zeros((1, 1, 1, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_opacity'].append(torch.cat([output['gauss_opacity'], padding_element], dim=-1))
+                elif key == 'gauss_scaling':
+                    padding_element = torch.zeros((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_scaling'].append(torch.cat([output['gauss_scaling'], padding_element], dim=-1))
+                elif key == 'gauss_rotation':
+                    padding_element = torch.zeros((1, 1, 4, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_rotation'].append(torch.cat([output['gauss_rotation'], padding_element], dim=-1))
+                elif key == 'gauss_features_dc':
+                    feat_dim = output['gauss_features_dc'].shape[2]
+                    padding_element = torch.zeros((1, 1, feat_dim, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_features_dc'].append(torch.cat([output['gauss_features_dc'], padding_element], dim=-1))
+                elif key == 'gauss_offset':
+                    padding_element = torch.zeros((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_offset'].append(torch.cat([output['gauss_offset'], padding_element], dim=-1))
+                elif key == 'gauss_means':
+                    padding_element = torch.ones((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num) * -1000000
+                    batchify_output['gauss_means'].append(torch.cat([output['gauss_means'], padding_element], dim=-1))
+                    
+        for key, value in batchify_output.items():
+            batchify_output[key] = torch.cat(value, dim=0)
+            
+        return batchify_output
         
 
     def forward(self, inputs):
@@ -119,62 +152,39 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d_origin, pts_feat, pts_rgb, pts_depth_origin, padding_select = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
+        pts3d_origin, pts_enc_feat, pts_rgb, pts_depth_origin, padding_select = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
-        if cfg.model.pre_downsample:
-            pts3d_origin, pts_feat, pts_rgb = random_droping(pts3d_origin, pts_feat, pts_rgb, cfg.model.donsample_ratio)
-        # Warning!!!!!! this code only support bs=1
+        # First, Voxelization and decode pre-batch data here
+        outputs = []
         for b in range(pts3d_origin.shape[0]):
-            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts3d_origin[b], pts_feat[b], pts_rgb[b], point_cloud_range=(-5, -5, 0, 5, 5, 20))
 
-            # storePly("/home/maoyucheng/code/GaussianAnything2/debug_vox.ply", voxel_centers.detach().cpu(), torch.zeros_like(voxel_centers).detach().cpu())
-            # storePly("/home/maoyucheng/code/GaussianAnything2/debug.ply", pts3d_origin[b].detach().cpu(), torch.zeros_like(pts3d_origin[b]).detach().cpu())
-            # breakpoint()
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts3d_origin[b], pts_enc_feat[b], pts_rgb[b], point_cloud_range=(-5, -5, 0, 5, 5, 20))
             voxels_features = self.vfe(features, num_points, coors)
             
-        # Warning!!!!!! Manually unsqueeze the btach size dim
-        voxel_centers = voxel_centers.unsqueeze(0)
-        voxels_features = voxels_features.unsqueeze(0)
+            voxel_centers = voxel_centers.unsqueeze(0)
+            voxels_features = voxels_features.unsqueeze(0)
+            # normalize points in each batch
+            mean = voxel_centers.mean(dim=1, keepdim=True) # (B, 1, 3)
+            z_median = torch.median(voxel_centers[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
+            pts3d = (voxel_centers - mean) / (z_median + 1e-6) # (B, N, 3)
 
-        if self.use_decoder_3d:
-            if self.normalize_before_decoder_3d:
-                # normalize points in each batch
-                mean = voxel_centers.mean(dim=1, keepdim=True) # (B, 1, 3)
-                z_median = torch.median(voxel_centers[:, :, 2:], dim=1, keepdim=True)[0] # (B, 1)
-                pts3d = (voxel_centers - mean) / (z_median + 1e-6) # (B, N, 3)
-            else:
-                pts3d = voxel_centers
-            pts3d_ori, pts_feat_ori = self.decoder_3d(pts3d, voxels_features)
+            pts3d, pts_feat = self.decoder_3d(pts3d, voxels_features)
+
+            pts3d = torch.cat(pts3d, dim=1)
+            pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
             
-            # WARNING!!! No multiscale gaussian here!!
-            # add predicted gaussian centroid offset with pts3d to get the final 3d centroids
-            if self.use_decoder_3d and self.normalize_before_decoder_3d:
-                # denormalize
-                pts3d_ori = pts3d_ori[-1] * (z_median + 1e-6) + mean # (B, N, 3)
+            output_batch = self.decoder_gs(pts_feat)
             
-            recon_pts = pts3d_ori.clone()
-            pts3d, pts_feat = [], []
-            for i in range(self.point_pre_voxle):
-                pts3d.append(pts3d_ori[-1] + self.point_offset[i](pts_feat_ori[-1]))
-                pts_feat.append(self.predict_feature[i](pts_feat_ori[-1]))
-
-            pts3d, pts_feat = torch.cat(pts3d, dim=1), torch.cat(pts_feat, dim=1)
-
-            outputs = self.decoder_gs([pts_feat]) 
-
+            offset = output_batch["gauss_offset"]
+            offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
+            pts3d = pts3d + offset
             
-        #offset after normalize
-        if cfg.model.predict_offset:
-            for i in range(cfg.model.overall_padding):
-                offset = outputs["gauss_offset"]
-                offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
-                pts3d = pts3d + offset
+            pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
+            output_batch["gauss_means"] = pts3d_reshape
+            
+            outputs.append(output_batch)
 
-        pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
-        outputs["gauss_means"] = pts3d_reshape
-
-        if cfg.loss.soft_cd.weight > 0:
-            outputs["recon_pts"] = recon_pts
+        outputs = self.padding_dummy_gaussians(outputs)
             
         outputs[("depth", 0)] = pts_depth_origin
 
