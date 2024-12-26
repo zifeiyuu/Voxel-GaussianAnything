@@ -69,8 +69,9 @@ class GATModel(BaseModel):
             
         self.parameters_to_train += self.encoder.get_parameter_groups()
         head_in_dim = [cfg.model.backbone.pts_feat_dim]
-        
-        self.vfe = HardVFE(in_channels=32+3+3, feat_channels=[64, 64], voxel_size=(0.02, 0.02, 0.02), point_cloud_range=(-5, -5, 0, 5, 5, 20))
+
+        self.voxel_size, self.pc_range = cfg.model.voxel_size, cfg.model.pc_range
+        self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[64, 64], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
         self.parameters_to_train += [{"params": self.vfe.parameters()}]
 
         self.decoder_3d = PointTransformerDecoder(cfg)
@@ -99,8 +100,10 @@ class GATModel(BaseModel):
         outputs = []
         for b in range(pts3d_origin.shape[0]):
 
-            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts3d_origin[b], pts_enc_feat[b], pts_rgb[b], point_cloud_range=(-5, -5, 0, 5, 5, 20))
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts3d_origin[b], pts_enc_feat[b], pts_rgb[b], voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
             voxels_features = self.vfe(features, num_points, coors)
+            
+            # TODO: We need a corase voxel predictor
             
             voxel_centers = voxel_centers.unsqueeze(0)
             voxels_features = voxels_features.unsqueeze(0)

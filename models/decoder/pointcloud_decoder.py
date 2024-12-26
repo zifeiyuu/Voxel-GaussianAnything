@@ -24,9 +24,6 @@ class PointTransformerDecoder(nn.Module):
         if self.version == 'v3':
             from .pointnet_models.PTv3 import PointTransformerV3Model
             self.transformer =  PointTransformerV3Model(**kw)  
-        elif self.version == 'v3_padding':
-            from .pointnet_models.PTv3_padding import PointTransformerV3Model
-            self.transformer =  PointTransformerV3Model(**kw)  
         else:
             self.transformer = PointTransformerV2_x(**kw)
         self.parameters_to_train = [{"params": list(self.transformer.parameters())}]
@@ -59,24 +56,6 @@ class PointTransformerDecoder(nn.Module):
                 pts_feat_list.append(pts_feat)
 
             return pts3d_list, pts_feat_list
-        elif self.version == 'v3_padding':
-            data_dict['grid_size'] = self.cfg.model.grid_size
-            (coords, feats, batchs), (feats_padded, batchs_padded) = self.transformer(data_dict)
-            pts3d_list = []
-            pts_feat_list, pts_feat_padded_list = [], []
-
-            for pts3d, pts_feat, pts_feat_padded in zip(coords, feats, feats_padded):
-                # Reshape and add to lists
-                pts3d = rearrange(pts3d, "(B N) C -> B N C", B=B)
-                pts_feat = rearrange(pts_feat, "(B N) C -> B N C", B=B)
-                # breakpoint()
-                pts_feat_padded = rearrange(pts_feat_padded, "(B N) C -> B N C", B=B)
-
-                pts3d_list.append(pts3d)
-                pts_feat_list.append(pts_feat)
-                pts_feat_padded_list.append(pts_feat_padded)
-
-            return pts3d_list, pts_feat_list, pts_feat_padded_list
         else:
         # forward through PointTransformer
             pts3d, pts_feat, offsets = self.transformer(data_dict)

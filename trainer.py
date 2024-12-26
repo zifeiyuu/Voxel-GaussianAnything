@@ -28,7 +28,7 @@ class Trainer(nn.Module):
         self.step = 0
         if cfg.model.name == "unidepth":
             self.model = GaussianPredictor(cfg)
-        elif cfg.model.name == "rgb_unidepth":
+        elif cfg.model.name == "gat_voxsplat":
             from models.gat_model import GATModel
             self.model = GATModel(cfg)
         else:
