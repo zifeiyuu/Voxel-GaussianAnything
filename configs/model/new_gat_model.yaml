@@ -59,3 +59,7 @@ scale_bias: 0.02
 # point parameters
 point_head_scale: 1e-2
 point_head_bias: 0.0
+
+# voxel parameters
+voxel_size: 0.02
+pc_range: [-5, -5, 0, 5, 5, 20]

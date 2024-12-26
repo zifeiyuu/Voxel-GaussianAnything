@@ -181,18 +181,6 @@ class MoGe_Encoder(nn.Module):
             new_features_list.append(features_new)
             new_rgbs_list.append(rgbs_new)
 
-
-            # # #debug
-            # image = self.color[0].detach().cpu().numpy()
-            # image = (image * 255).astype(np.uint8)
-            # points = valid_indices.cpu().numpy()[:, 1:][::-1] 
-            # for point in points:
-            #     y, x = point
-            #     if 0 <= x < W and 0 <= y < H:
-            #         image[:, y, x] = [255, 0, 0]
-            # image = np.transpose(image, (1, 2, 0)) 
-            # cv2.imwrite(f"/mnt/ziyuxiao/code/GaussianAnything/output/debug/{time.time()}.png", image)
-
         new_pts3d = torch.cat(new_pts3d_list, dim=0).reshape(B, -1, 3)  # (B, N_new, 3)
         new_features = torch.cat(new_features_list, dim=0).reshape(B, -1, features.shape[-1])  # (B, N_new, D)
         new_rgbs = torch.cat(new_rgbs_list, dim=0).reshape(B, -1, rgbs.shape[-1])  # (B, N_new, 3)
@@ -264,14 +252,6 @@ class MoGe_Encoder(nn.Module):
         pts_depth = rearrange(depth, '(b c) h w -> b (h w) c', b=B) #B (H W) C
         mask = rearrange(mask, '(b c) h w -> b (h w) c', b=B) #B (H W) C
 
-        #fill the inf depth with a desgined value
-        # max_depth = pts_depth[torch.isfinite(pts_depth)].max().item()  # Get the maximum valid depth
-        # pts_depth = pts_depth.masked_fill(~mask.bool(), 1 + max_depth)
-        # masked_depths = torch.masked_select(pts_depth, ~mask)
-
-        # scale depth map smaller to avoid bug
-        # pts_depth = pts_depth * 1
-
         # vit encoder to get per-image features
         # Encode
         encoder_outputs = features[-1][0] #last layer of transformer    
@@ -289,25 +269,5 @@ class MoGe_Encoder(nn.Module):
         #directly give decoder rgb information for each 3d point
         pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
         pts_depth_origin = rearrange(pts_depth, 'b (h w) c -> b c h w', h=H, w=W) #B (H W) C
-        # # mask out invalid points
-        # if torch.count_nonzero(mask).item() != H*W:
-        #     D = self.pts_feat_dim
-        #     # Apply mask directly
-        #     with torch.no_grad():
-        #         pts_feat = pts_feat[mask.expand(-1, -1, D)].view(B, -1, D)
-        #         pts3d = pts3d[mask.expand(-1, -1, 3)].view(B, -1, 3)
-        #         pts_rgb = pts_rgb[mask.expand(-1, -1, 3)].view(B, -1, 3)
 
-        padding_select = None
-        padding = self.cfg.model.selective_padding
-        if padding:
-            rgbs = rearrange(rgbs, 'b c h w -> b h w c')
-            feats = rearrange(pts_feat, 'b (h w) d -> b h w d', h=H, w=W)            
-            padding_select = self.selective_padding_selectOnly(depth, rgbs, feats, inv_K, threshold=self.cfg.model.large_grad_threshold)
-
-            # padded_pts3d, padded_feat, padded_rgb = self.selective_padding(depth, rgbs, feats, inv_K, threshold=self.cfg.model.large_grad_threshold)
-            # pts3d = torch.cat([pts3d, padded_pts3d], dim=1)
-            # pts_feat = torch.cat([pts_feat, padded_feat], dim=1)
-            # pts_rgb = torch.cat([pts_rgb, padded_rgb], dim=1)
-
-        return pts3d, pts_feat, pts_rgb, pts_depth_origin, padding_select
+        return pts3d, pts_feat, pts_rgb, pts_depth_origin

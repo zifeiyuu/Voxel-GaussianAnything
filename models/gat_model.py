@@ -8,9 +8,6 @@ from pathlib import Path
 from einops import rearrange
 import collections
 
-from .encoder.layers import BackprojectDepth
-from .encoder.dust3r_encoder import Dust3rEncoder
-from .encoder.rgb_unidepth_encoder import Rgb_unidepth_Encoder
 from .encoder.moge_encoder import MoGe_Encoder
 from .encoder.voxel_encoder import prepare_hard_vfe_inputs_scatter_fast, HardVFE
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
@@ -23,7 +20,6 @@ from misc.visualise_3d import storePly # for debugging
 from .decoder.pointcloud_decoder import PointTransformerDecoder
 
 from IPython import embed
-from models.decoder.resnet_decoder import ResnetDecoder
 
 from torch.utils.checkpoint import checkpoint
 from torch_scatter import scatter_mean
@@ -68,83 +64,28 @@ class GATModel(BaseModel):
         self.parameters_to_train = []
 
         # define the model
-        if "dust3r" in cfg.model.backbone.name:
-            self.encoder = Dust3rEncoder(cfg)
-        elif "unidepth" in cfg.model.backbone.name:
-            self.encoder = Rgb_unidepth_Encoder(cfg)
-        elif "moge" in cfg.model.backbone.name:
+        if "moge" in cfg.model.backbone.name:
             self.encoder = MoGe_Encoder(cfg)
             
         self.parameters_to_train += self.encoder.get_parameter_groups()
         head_in_dim = [cfg.model.backbone.pts_feat_dim]
         
-        self.vfe = HardVFE(in_channels=32+3+3, feat_channels=[64, 64], voxel_size=(0.02, 0.02, 0.02), point_cloud_range=(-2, -2, 0, 2, 2, 10))
+        self.vfe = HardVFE(in_channels=32+3+3, feat_channels=[64, 64], voxel_size=(0.02, 0.02, 0.02), point_cloud_range=(-5, -5, 0, 5, 5, 20))
         self.parameters_to_train += [{"params": self.vfe.parameters()}]
 
-
-        self.use_decoder_3d = cfg.model.use_decoder_3d
-        if self.use_decoder_3d:
-            self.normalize_before_decoder_3d = cfg.model.normalize_before_decoder_3d
-            self.decoder_3d = PointTransformerDecoder(cfg)
-            self.parameters_to_train += self.decoder_3d.get_parameter_groups()
-            head_in_dim = self.decoder_3d.transformer.out_dim
+        self.decoder_3d = PointTransformerDecoder(cfg)
+        self.parameters_to_train += self.decoder_3d.get_parameter_groups()
+        head_in_dim = self.decoder_3d.transformer.out_dim
 
         self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
 
-        # init a point decoder for compute point offset
-        if cfg.loss.soft_cd.weight > 0: # means we use cd loss here
-            self.decoder_point = nn.Linear(self.decoder_3d.transformer.out_dim[-1] + 3, 3)
-            nn.init.xavier_uniform_(self.decoder_point.weight, cfg.model.point_head_scale)
-            nn.init.constant_(self.decoder_point.bias, cfg.model.point_head_bias)
 
         self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
         self.use_checkpoint = False
         self.use_reentrant = False
         
-    def padding_dummy_gaussians(self, outputs):
-        # This func is using for padding dummy gaussian for batchify the rendering process
-        # we padd a very far away gaussians with 0 opacity, try not to affect the rendering process, although it might be little slow
-        gaussian_num = []
-        for output in outputs:
-            dtype, device = output["gauss_scaling"].dtype, output["gauss_scaling"].device
-            gaussian_num.append(output["gauss_scaling"].shape[-1])
-            
-        max_num_gaussians = max(gaussian_num)
-        batchify_output = collections.defaultdict(list)
-        for output in outputs:
-            if output["gauss_scaling"].shape[-1] == max_num_gaussians:
-                for key, value in output.items():
-                    batchify_output[key].append(value)
-                continue
-            for key, value in output.items():
-                # for opacity, we should padding gaussians 
-
-                padding_num = abs(output["gauss_scaling"].shape[-1] - max_num_gaussians)
-                if key == 'gauss_opacity':
-                    padding_element = torch.zeros((1, 1, 1, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
-                    batchify_output['gauss_opacity'].append(torch.cat([output['gauss_opacity'], padding_element], dim=-1))
-                elif key == 'gauss_scaling':
-                    padding_element = torch.zeros((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
-                    batchify_output['gauss_scaling'].append(torch.cat([output['gauss_scaling'], padding_element], dim=-1))
-                elif key == 'gauss_rotation':
-                    padding_element = torch.zeros((1, 1, 4, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
-                    batchify_output['gauss_rotation'].append(torch.cat([output['gauss_rotation'], padding_element], dim=-1))
-                elif key == 'gauss_features_dc':
-                    feat_dim = output['gauss_features_dc'].shape[2]
-                    padding_element = torch.zeros((1, 1, feat_dim, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
-                    batchify_output['gauss_features_dc'].append(torch.cat([output['gauss_features_dc'], padding_element], dim=-1))
-                elif key == 'gauss_offset':
-                    padding_element = torch.zeros((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
-                    batchify_output['gauss_offset'].append(torch.cat([output['gauss_offset'], padding_element], dim=-1))
-                elif key == 'gauss_means':
-                    padding_element = torch.ones((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num) * -1000000
-                    batchify_output['gauss_means'].append(torch.cat([output['gauss_means'], padding_element], dim=-1))
-                    
-        for key, value in batchify_output.items():
-            batchify_output[key] = torch.cat(value, dim=0)
-            
-        return batchify_output
+    
         
 
     def forward(self, inputs):
@@ -193,43 +134,47 @@ class GATModel(BaseModel):
             self.render_images(inputs, outputs)
 
         return outputs
+    
+    def padding_dummy_gaussians(self, outputs):
+        # This func is using for padding dummy gaussian for batchify the rendering process
+        # we padd a very far away gaussians with 0 opacity, try not to affect the rendering process, although it might be little slow
+        gaussian_num = []
+        for output in outputs:
+            dtype, device = output["gauss_scaling"].dtype, output["gauss_scaling"].device
+            gaussian_num.append(output["gauss_scaling"].shape[-1])
+            
+        max_num_gaussians = max(gaussian_num)
+        batchify_output = collections.defaultdict(list)
+        for output in outputs:
+            if output["gauss_scaling"].shape[-1] == max_num_gaussians:
+                for key, value in output.items():
+                    batchify_output[key].append(value)
+                continue
+            for key, value in output.items():
+                # for opacity, we should padding gaussians 
 
-
-def points_to_voxels(pts3d_origin, pts_feat, pts_rgb, voxel_size):
-    B, N, _ = pts3d_origin.shape
-    feature_dim = pts_feat.shape[2]
-    voxel_xyz, voxel_features, voxel_colors = [], [], []
-
-    for b in range(B):
-        # Quantize points into voxel indices
-        voxel_indices = (pts3d_origin[b] / voxel_size).floor().long()
-        aggregated_xyz, inverse_indices = torch.unique(voxel_indices, dim=0, return_inverse=True)
-        
-        # Aggregate features and colors separately
-        aggregated_features = scatter_mean(pts_feat[b], inverse_indices, dim=0)
-        aggregated_colors = scatter_mean(pts_rgb[b], inverse_indices, dim=0)
-
-        voxel_xyz.append(aggregated_xyz)
-        voxel_features.append(aggregated_features)
-        voxel_colors.append(aggregated_colors)
-
-    # Stack results
-    max_voxels = max(loc.shape[0] for loc in voxel_xyz)
-    padded_xyz = torch.zeros(B, max_voxels, 3, dtype=torch.long)
-    padded_features = torch.zeros(B, max_voxels, feature_dim)
-    padded_colors = torch.zeros(B, max_voxels, 3)
-
-    for b in range(B):
-        M = voxel_xyz[b].shape[0]
-        padded_xyz[b, :M] = voxel_xyz[b]
-        padded_features[b, :M] = voxel_features[b]
-        padded_colors[b, :M] = voxel_colors[b]
-
-    return padded_xyz.float().to(pts3d_origin.device), padded_features.to(pts_feat.device), padded_colors.to(pts_rgb.device)
-
-def random_droping(pts3d_origin, pts_feat, pts_rgb, ratio):
-    B, N, _ = pts3d_origin.shape
-    device = pts3d_origin.device
-    mask = (torch.rand(N, device=device) > ratio)
-    # breakpoint()
-    return pts3d_origin[:, mask], pts_feat[:, mask], pts_rgb[:, mask]
+                padding_num = abs(output["gauss_scaling"].shape[-1] - max_num_gaussians)
+                if key == 'gauss_opacity':
+                    padding_element = torch.zeros((1, 1, 1, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_opacity'].append(torch.cat([output['gauss_opacity'], padding_element], dim=-1))
+                elif key == 'gauss_scaling':
+                    padding_element = torch.zeros((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_scaling'].append(torch.cat([output['gauss_scaling'], padding_element], dim=-1))
+                elif key == 'gauss_rotation':
+                    padding_element = torch.zeros((1, 1, 4, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_rotation'].append(torch.cat([output['gauss_rotation'], padding_element], dim=-1))
+                elif key == 'gauss_features_dc':
+                    feat_dim = output['gauss_features_dc'].shape[2]
+                    padding_element = torch.zeros((1, 1, feat_dim, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_features_dc'].append(torch.cat([output['gauss_features_dc'], padding_element], dim=-1))
+                elif key == 'gauss_offset':
+                    padding_element = torch.zeros((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num)
+                    batchify_output['gauss_offset'].append(torch.cat([output['gauss_offset'], padding_element], dim=-1))
+                elif key == 'gauss_means':
+                    padding_element = torch.ones((1, 1, 3, 1), dtype=dtype, device=device).repeat(1, 1, 1, padding_num) * -1000000
+                    batchify_output['gauss_means'].append(torch.cat([output['gauss_means'], padding_element], dim=-1))
+                    
+        for key, value in batchify_output.items():
+            batchify_output[key] = torch.cat(value, dim=0)
+            
+        return batchify_output
