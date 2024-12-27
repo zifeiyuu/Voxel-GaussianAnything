@@ -1,6 +1,7 @@
 import time
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import os
 import logging
@@ -141,11 +142,17 @@ class Trainer(nn.Module):
             # no bidirection here, cd should have direction
             cd += chamferDistance(scene_recon_pts.unsqueeze(0), scene_pts.unsqueeze(0))
             
-            # can do sanity check by uncomment these, they should align in the same coords
-            # storePly("/home/maoyucheng/code/GaussianAnything2/debug.ply", scene_pts.detach().cpu().numpy(), torch.ones_like(scene_pts).detach().cpu().numpy())
-            # storePly("/home/maoyucheng/code/GaussianAnything2/debug_recon.ply", scene_recon_pts.detach().cpu().numpy(), torch.ones_like(scene_recon_pts).detach().cpu().numpy())
-            
         return cd
+    
+    def compute_bce_loss(self, outputs):
+        binary_logits, binary_voxels = outputs['binary_logits'], outputs['binary_voxel']
+        
+        bce_loss = F.binary_cross_entropy_with_logits(binary_logits, binary_voxels, reduction="mean")
+        rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
+            (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
+        ).sum()
+            
+        return bce_loss, rec_iou
 
 
     
@@ -196,6 +203,13 @@ class Trainer(nn.Module):
                 cd_loss = self.compute_cd_loss(inputs, outputs)
                 losses["loss/cd_loss"] = cd_loss
                 total_loss += cfg.loss.soft_cd.weight * cd_loss
+                
+            # regularize binary voxel
+            if cfg.loss.bce.weight > 0:
+                bce_loss, rec_iou = self.compute_bce_loss(outputs)
+                losses["loss/bce_loss"] = bce_loss
+                losses["loss/rec_iou"] = rec_iou
+                total_loss += cfg.loss.bce.weight * bce_loss
 
             if cfg.loss.gauss_depth.weight > 0:
                 depth_loss = self.compute_depth_loss(inputs, outputs)

@@ -58,4 +58,6 @@ point_head_bias: 0.0
 
 # voxel parameters
 voxel_size: 0.02
-pc_range: [-5, -5, 0, 5, 5, 20]
+pc_range: [-5, -5, 0, 5, 5, 15]
+coarse_voxel_size: 0.16
+voxel_feat_dim: 64

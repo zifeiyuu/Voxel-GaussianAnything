@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "debug" # moge_multiscale_padding_lpips
+  exp_name: "vfe_bce_check" # moge_multiscale_padding_lpips
   file: "gat_config.yaml"
 
 data_loader:

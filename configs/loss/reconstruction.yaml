@@ -8,3 +8,6 @@ ssim:
 lpips:
   weight: 0.25
   apply_after_step: 1
+
+bce:
+  weight: 100

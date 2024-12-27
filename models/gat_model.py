@@ -18,6 +18,7 @@ from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, depthm
 from misc.visualise_3d import storePly # for debugging
 
 from .decoder.pointcloud_decoder import PointTransformerDecoder
+from .decoder.voxel_predictor import VoxPredictor
 
 from IPython import embed
 
@@ -73,6 +74,9 @@ class GATModel(BaseModel):
         self.voxel_size, self.pc_range = cfg.model.voxel_size, cfg.model.pc_range
         self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[64, 64], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
         self.parameters_to_train += [{"params": self.vfe.parameters()}]
+        
+        self.vox_pred = VoxPredictor(cfg)
+        self.parameters_to_train += self.vox_pred.get_parameter_groups()
 
         self.decoder_3d = PointTransformerDecoder(cfg)
         self.parameters_to_train += self.decoder_3d.get_parameter_groups()
@@ -94,17 +98,18 @@ class GATModel(BaseModel):
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics
 
-        pts3d_origin, pts_enc_feat, pts_rgb, pts_depth_origin, padding_select = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
+        pts3d_origin, pts_enc_feat, pts_rgb, pts_depth_origin = self.encoder(inputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
         # First, Voxelization and decode pre-batch data here
-        outputs = []
+        outputs, binary_logits, binary_voxel = [], [], []
         for b in range(pts3d_origin.shape[0]):
 
             features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts3d_origin[b], pts_enc_feat[b], pts_rgb[b], voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
             voxels_features = self.vfe(features, num_points, coors)
-            
+
             # TODO: We need a corase voxel predictor
-            
+            batch_binary_logits, batch_binary_voxel = self.vox_pred(voxels_features, coors)
+
             voxel_centers = voxel_centers.unsqueeze(0)
             voxels_features = voxels_features.unsqueeze(0)
             # normalize points in each batch
@@ -127,10 +132,17 @@ class GATModel(BaseModel):
             output_batch["gauss_means"] = pts3d_reshape
             
             outputs.append(output_batch)
-
+            binary_voxel.append(batch_binary_voxel)
+            binary_logits.append(batch_binary_logits)
+            
+        # save binary_voxel and binary_logits
+        binary_logits, binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0)
+        
         outputs = self.padding_dummy_gaussians(outputs)
             
         outputs[("depth", 0)] = pts_depth_origin
+        outputs["binary_logits"], outputs["binary_voxel"] = binary_logits, binary_voxel
+
 
         if cfg.model.gaussian_rendering:
             self.process_gt_poses(inputs, outputs)
