@@ -92,7 +92,7 @@ class BaseModel(nn.Module):
 
         if cfg.dataset.scale_pose_by_depth:
             B = cfg.data_loader.batch_size
-            depth_padded = outputs[("depth", 0)].detach()
+            depth_padded = outputs[("depth_pred", 0)].detach()
             # only use the depth in the unpadded image for scale estimation
             depth = depth_padded[:, :, 
                                  self.cfg.dataset.pad_border_aug:depth_padded.shape[2]-self.cfg.dataset.pad_border_aug,
@@ -106,10 +106,6 @@ class BaseModel(nn.Module):
                 if ("scale_colmap", 0) in inputs.keys():
                     scale = inputs[("scale_colmap", 0)][k]
                 else:
-                    # if self.is_train():
-                    #     scale = estimate_depth_scale(depth_k, sparse_depth_k)
-                    # else:
-                    #     scale = estimate_depth_scale_ransac(depth_k, sparse_depth_k)
                     scale = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
                 scales.append(scale)
             scale = torch.tensor(scales, device=depth.device).unsqueeze(dim=1)

@@ -60,8 +60,33 @@ def estimate_depth_scale_by_depthmap(depth, tgt_depth, max_depth=20):
     tgt_depth = tgt_depth.to(device)
     
     valid_mask = torch.logical_and((tgt_depth > eps), (tgt_depth < max_depth)).bool()
-    scale = depth.squeeze()[valid_mask].median() / tgt_depth[valid_mask].median()
+    scale = (depth.squeeze()[valid_mask].log() - tgt_depth[valid_mask].log()).mean().exp()
+    # scale = depth.squeeze()[valid_mask].median() / tgt_depth[valid_mask].median()
     return scale
+
+def estimate_depth_scale_bias(depth, tgt_depth, max_depth=20):
+    """
+    depth: [1, 1, H, W]
+    tgt_depth: [H, W]
+    """
+
+    eps = 1e-3
+    device = depth.device
+    tgt_depth = tgt_depth.to(device)
+    
+    valid_mask = torch.logical_and((tgt_depth > eps), (tgt_depth < max_depth)).bool()
+    source_flat = depth[valid_mask].view(-1)  
+    target_flat = tgt_depth[valid_mask].view(-1) 
+
+    A = torch.cat((source_flat.unsqueeze(1), torch.ones(source_flat.size(0), 1, device=source_flat.device)), dim=1)
+
+    A_t = torch.transpose(A, 0, 1)
+    AtA = torch.matmul(A_t, A)
+    A_t_D2 = torch.matmul(A_t, target_flat)
+    X = torch.pinverse(AtA).matmul(A_t_D2)
+    s, b = X[0], X[1]
+    return s, b
+
 
 
 def estimate_depth_scale_ransac(depth, sparse_depth, num_iterations=1000, sample_size=5, threshold=0.1):
@@ -245,5 +270,27 @@ def depthmap_to_absolute_camera_coordinates(depthmap, camera_intrinsics, camera_
 
         # Express in absolute coordinates (invalid depth values)
         X_world = np.einsum("ik, vuk -> vui", R_cam2world, X_cam) + t_cam2world[None, None, :]
+
+    return X_world, valid_mask
+
+def depthmap_to_absolute_camera_coordinates_torch(depthmap, camera_intrinsics, camera_pose, **kw):
+    """
+    Args:
+        - depthmap (HxW array):
+        - camera_intrinsics: a 3x3 matrix
+        - camera_pose: a 4x3 or 4x4 cam2world matrix
+    Returns:
+        pointmap of absolute coordinates (HxWx3 array), and a mask specifying valid pixels."""
+    X_cam, valid_mask = depthmap_to_camera_coordinates_torch(depthmap, camera_intrinsics)
+
+    X_world = X_cam # default
+    if camera_pose is not None:
+        # R_cam2world = np.float32(camera_params["R_cam2world"])
+        # t_cam2world = np.float32(camera_params["t_cam2world"]).squeeze()
+        R_cam2world = camera_pose[:3, :3]
+        t_cam2world = camera_pose[:3, 3]
+
+        # Express in absolute coordinates (invalid depth values)
+        X_world = torch.matmul(X_cam, R_cam2world.T) + t_cam2world[None, None, :]
 
     return X_world, valid_mask

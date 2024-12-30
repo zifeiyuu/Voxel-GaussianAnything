@@ -209,6 +209,7 @@ class Trainer(nn.Module):
                 bce_loss, rec_iou = self.compute_bce_loss(outputs)
                 losses["loss/bce_loss"] = bce_loss
                 losses["loss/rec_iou"] = rec_iou
+                losses["padding_number"] = outputs["padding_number"]
                 total_loss += cfg.loss.bce.weight * bce_loss
 
             if cfg.loss.gauss_depth.weight > 0:

@@ -3,6 +3,67 @@ from torch_scatter import scatter_min, scatter_add
 from torch.nn import functional as F
 from torch import Tensor, nn
 
+import torch
+
+def compute_voxel_coors_and_centers(
+    pts3d: torch.Tensor,      # (N, 3)
+    voxel_size: float = 0.02,
+    point_cloud_range=(0, 0, 0, 0, 0, 0)
+):
+    device = pts3d.device
+    
+    # 1) 计算体素坐标
+    #    voxel_indices[i] = floor((pts3d[i] - grid_min) / voxel_size)
+    grid_min = torch.tensor(point_cloud_range[:3], dtype=torch.float32, device=device)
+    grid_max = torch.tensor(point_cloud_range[3:], dtype=torch.float32, device=device)
+    voxel_indices = torch.floor((pts3d - grid_min) / voxel_size).long()  # (N, 3)
+    
+    # 2) 筛选出范围内的点
+    voxel_dims = ((grid_max - grid_min) / voxel_size).long()  # (3,)
+    mask_min = (voxel_indices >= 0).all(dim=1)
+    mask_max = (voxel_indices < voxel_dims).all(dim=1)
+    valid_mask = mask_min & mask_max
+    
+    pts3d_valid = pts3d[valid_mask]
+    voxel_indices_valid = voxel_indices[valid_mask]
+    
+    # 3) 为体素分配一个哈希 (z*1e6 + y*1e3 + x)
+    voxel_hash = (
+          voxel_indices_valid[:, 2] * 10**6
+        + voxel_indices_valid[:, 1] * 10**3
+        + voxel_indices_valid[:, 0]
+    )
+    
+    # 4) 找到去重后的体素哈希，以及对应下标
+    unique_voxel_hash = torch.unique(voxel_hash)
+    M = unique_voxel_hash.size(0)  # 体素数
+    
+    # 5) 反推得到 x, y, z 并构造 coors
+    #    注意: z = hash // 1e6, 然后再取 yz = hash % 1e6, y = yz // 1e3, x = yz % 1e3
+    z = (unique_voxel_hash // 10**6).long()
+    yz = (unique_voxel_hash % 10**6).long()
+    y = (yz // 10**3).long()
+    x = (yz % 10**3).long()
+    
+    # batch_idx 这里全用 0
+    batch_idx = torch.zeros_like(z, dtype=torch.long)
+    
+    # (M, 4): [batch_idx, z, y, x]
+    coors = torch.stack([batch_idx, z, y, x], dim=1)  # (M,4)
+    
+    # 6) 计算体素中心
+    #    center_x = x * voxel_size + grid_min[0] + voxel_size/2
+    #    center_y = ...
+    #    center_z = ...
+    voxel_centers = torch.stack([
+        x.float() * voxel_size + grid_min[0] + voxel_size / 2,
+        y.float() * voxel_size + grid_min[1] + voxel_size / 2,
+        z.float() * voxel_size + grid_min[2] + voxel_size / 2
+    ], dim=1)  # (M, 3)
+    
+    return coors, voxel_centers
+
+
 
 def prepare_hard_vfe_inputs_scatter_fast(
     pts3d: torch.Tensor,      # (N, 3)
