@@ -119,7 +119,7 @@ class GATModel(BaseModel):
 
         for batch_idx in range(len(outputs[('depth_pred', 0)])):
             pts3d = []
-            for frameid in [0]:
+            for frameid in self.using_frames:
                 depth, K = outputs[('depth_pred', frameid)][batch_idx].squeeze(), inputs[('K_tgt', frameid)][batch_idx]
                 c2w = outputs[('cam_T_cam', frameid, 0)][batch_idx] if frameid != 0 else None
 
@@ -166,12 +166,12 @@ class GATModel(BaseModel):
             voxels_features = self.vfe(features, num_points, coors)
             
             # TODO: We need a corase voxel predictor
-            batch_binary_logits, batch_binary_voxel = self.vox_pred(voxels_features, coors)
+            batch_binary_logits, _ = self.vox_pred(voxels_features, coors)
             # get gt corase voxel here
-            # if self.training:
-            #     batch_binary_voxel = self.get_binary_voxels(gt_points[b]).float()
-            # else:
-            #     batch_binary_voxel = torch.zeros_like(batch_binary_logits)
+            if self.training:
+                batch_binary_voxel = self.get_binary_voxels(gt_points[b]).float()
+            else:
+                batch_binary_voxel = torch.zeros_like(batch_binary_logits)
 
             # padded_coors, padded_voxel_centers = self.padding_voxel_maxpooling(coors, (batch_binary_logits.sigmoid() > 0.5).float())
             # padding_number += padded_coors.shape[0]

@@ -6,11 +6,11 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "vfe_c2f_voxpred_recon_ori" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
+  exp_name: "vfe_c2f_voxpred_recon" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 1
+  batch_size: 2
   num_workers: 16
 
 train:
@@ -29,7 +29,7 @@ optimiser:
   num_epochs: 1
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 4
+  accumulation_steps: 2
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0
