@@ -47,9 +47,9 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 10
-  save_frequency: 10
-  val_frequency: 10
+  log_frequency: 1000
+  save_frequency: 1000
+  val_frequency: 1000
   num_keep_ckpts: 5
 
 #new
