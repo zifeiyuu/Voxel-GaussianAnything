@@ -12,6 +12,7 @@ from ema_pytorch import EMA
 from omegaconf import DictConfig
 from hydra import main
 from hydra.core.hydra_config import HydraConfig
+from pathlib import Path
 
 from evaluation.evaluator import Evaluator
 from datasets.util import create_datasets
@@ -82,10 +83,19 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
             trainer.log_scalars("train", outputs, losses, learning_rate)
 
             if step % cfg.run.save_frequency == 0 and step != 0:
-                if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
-                    trainer.model.module.save_model(optimiser, step, ema)
+                if cfg.train.pretrain:
+                    base_dir = Path(__file__).resolve().parent
+                    out_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain_ckpt"
+
+                    if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
+                        trainer.model.module.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
+                    else:
+                        trainer.model.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
                 else:
-                    trainer.model.save_model(optimiser, step, ema)
+                    if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
+                        trainer.model.module.save_model(optimiser, step, ema)
+                    else:
+                        trainer.model.save_model(optimiser, step, ema)
 
             if step != 0 and (early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
                 with torch.no_grad():
@@ -124,8 +134,10 @@ def main(cfg: DictConfig):
     torch.cuda.set_device(local_rank)
     set_seed_everywhere(cfg.run.random_seed + local_rank)
 
+    pretrain = cfg.train.pretrain
+
     # Set up model
-    trainer = Trainer(cfg)
+    trainer = Trainer(cfg, pretrain)
     # trainer.set_logger()
     if local_rank == 0:
         trainer.set_logger(cfg)
@@ -136,8 +148,16 @@ def main(cfg: DictConfig):
         model.to(local_rank), device_ids=[local_rank], find_unused_parameters=True)
     
     # set up optimiser
-    # optimiser = optim.AdamW(model.parameters_to_train, lr=cfg.optimiser.learning_rate, weight_decay=cfg.optimiser.weight_decay) 
-    optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
+    if pretrain:
+        optimiser = optim.Adam(model.pretrain_parameters, cfg.optimiser.learning_rate)
+    else:
+        # Freeze pretrained parameters
+        if cfg.train.freeze_pretrain:
+            for param_group in model.pretrain_parameters:
+                for param in param_group["params"]:
+                    param.requires_grad = False
+        optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
+
     num_warmup_steps = cfg.optimiser.num_warmup_steps
     max_training_steps = cfg.optimiser.max_training_steps
     min_lr_ratio = cfg.optimiser.min_lr_ratio
@@ -185,13 +205,26 @@ def main(cfg: DictConfig):
         ema = None
 
     # Load model from checkpoint
-    if (ckpt_dir := model.checkpoint_dir()).exists():
-        model.load_model(ckpt_dir, optimiser=optimiser)
-        print(f"Resume training using checkpoint from {ckpt_dir}")
-    elif cfg.train.load_weights_folder:
-        model.load_model(cfg.ckpt_path)
-        print(f"Train using existing checkpoint from {cfg.ckpt_path}")
-
+    if pretrain:
+        if (ckpt_dir := model.checkpoint_dir()).exists():
+            model.load_model(ckpt_dir, optimiser=optimiser, pretraining=True)
+            print(f"Resume training using checkpoint from {ckpt_dir}")
+        elif cfg.train.load_weights_folder:
+            model.load_model(cfg.ckpt_path, pretraining=True)
+            print(f"Train using existing checkpoint from {cfg.ckpt_path}")
+    else:
+        if cfg.train.load_pretrain:
+            base_dir = Path(__file__).resolve().parent
+            load_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain_ckpt"
+            model.load_model(load_dir, optimiser=optimiser, pretraining=True, load_optimizer=False)
+            print(f"Train using existing checkpoint from {load_dir}")
+        else:
+            if (ckpt_dir := model.checkpoint_dir()).exists():
+                model.load_model(ckpt_dir, optimiser=optimiser, pretraining=False)
+                print(f"Resume training using checkpoint from {ckpt_dir}")
+            elif cfg.train.load_weights_folder:
+                model.load_model(cfg.ckpt_path, pretraining=False)
+                print(f"Train using existing checkpoint from {cfg.ckpt_path}")
     trainer.model = ddp_model
 
     # Set up dataset

@@ -22,11 +22,12 @@ from torch.utils.tensorboard import SummaryWriter
 from IPython import embed
 
 class Trainer(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, pretrain):
         super().__init__()
 
         self.cfg = cfg
         self.step = 0
+        self.pretrain = pretrain
         if cfg.model.name == "unidepth":
             self.model = GaussianPredictor(cfg)
         elif cfg.model.name == "gat_voxsplat":
@@ -59,7 +60,10 @@ class Trainer(nn.Module):
             mask = self.calculate_mask(inputs)
         else:
             mask = None
-        losses = self.compute_losses(inputs, outputs, mask)
+        if self.pretrain:
+            losses = self.compute_pretraining_loss(outputs)
+        else:
+            losses = self.compute_losses(inputs, outputs, mask)
         self.get_grad_norm(outputs)
         return losses, outputs
     
@@ -153,7 +157,19 @@ class Trainer(nn.Module):
         ).sum()
             
         return bce_loss, rec_iou
+    
+    def compute_pretraining_loss(self, outputs):
+        losses = {}
+        total_loss = 0.0
 
+        bce_loss, rec_iou = self.compute_bce_loss(outputs)
+        losses["loss/bce_loss"] = bce_loss
+        losses["loss/rec_iou"] = rec_iou
+        losses["padding_number"] = outputs["padding_number"]
+        total_loss += self.cfg.loss.bce.weight * bce_loss
+        losses["loss/total"] = total_loss
+
+        return losses
 
     
     def compute_losses(self, inputs, outputs, mask):

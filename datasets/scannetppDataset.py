@@ -364,8 +364,6 @@ class scannetppDataset(Dataset):
                 depth_name = pose_data['images'][frame_idx][:-4] + '.png'
                 depth_path = self.dataset_folder / self.mode / seq_key / 'depth' / depth_name
                 depth = self.process_depth(depth_path)
-                
-                
 
             # Additional metadata
             first_img_name = pose_data['images'][0][:-4]  # The source frame

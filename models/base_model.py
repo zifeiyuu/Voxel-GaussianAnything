@@ -232,20 +232,33 @@ class BaseModel(nn.Module):
     def checkpoint_dir(self):
         return Path("checkpoints")
 
-    def save_model(self, optimiser, step, ema=None):
+    def save_model(self, optimiser, step, ema=None, save_folder = None, pretraining=False):
         """save model weights to disk"""
-        save_folder = self.checkpoint_dir()
+        if save_folder == None:
+            save_folder = self.checkpoint_dir()
         save_folder.mkdir(exist_ok=True, parents=True)
 
-        save_path = save_folder / f"model_{step:07}.pth"
+        phase = "pretrain" if pretraining else "finetune"
+        save_path = save_folder / f"model_{phase}_{step:07}.pth"
         logging.info(f"saving checkpoint to {str(save_path)}")
 
         model = ema.ema_model if ema is not None else self
+
+        if pretraining:
+            # Save only the pretraining parts
+            model_state = {
+                k: v for k, v in model.state_dict().items()
+                if "vfe" in k or "vox_pred" in k
+            }
+        else:
+            model_state = model.state_dict()
+
         save_dict = {
-            "model": model.state_dict(),
+            "model": model_state,
             "version": "1.0",
             "optimiser": optimiser.state_dict(),
-            "step": step
+            "step": step,
+            "pretraining": pretraining
         }
         torch.save(save_dict, save_path)
 
@@ -255,7 +268,7 @@ class BaseModel(nn.Module):
             for ckpt in ckpts[num_ckpts:]:
                 ckpt.unlink()
 
-    def load_model(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0):
+    def load_model(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0, pretraining=False, load_optimizer=True):
         """load model(s) from disk"""
         weights_path = Path(weights_path)
 
@@ -263,17 +276,26 @@ class BaseModel(nn.Module):
             ckpts = sorted(list(weights_path.glob("model_*.pth")), reverse=True)
             weights_path = ckpts[ckpt_ids]
         logging.info(f"Loading weights from {weights_path}...")
+
         state_dict = torch.load(weights_path, map_location=torch.device(device))
+        model_dict = state_dict["model"]
         new_dict = {}
-        for k, v in state_dict["model"].items():
-            if "backproject_depth" in k:
-                new_dict[k] = self.state_dict()[k].clone()
-            else:
-                new_dict[k] = v.clone()
+        if pretraining:
+            # Load only pretraining parts
+            for k, v in model_dict.items():
+                if "vfe" in k or "vox_pred" in k:
+                    new_dict[k] = v.clone()
+        else:
+            # Load the entire model
+            for k, v in model_dict.items():
+                if "backproject_depth" in k:
+                    new_dict[k] = self.state_dict()[k].clone()
+                else:
+                    new_dict[k] = v.clone()
         self.load_state_dict(new_dict, strict=False)
         
         # loading adam state
-        if optimiser is not None:
+        if optimiser is not None and load_optimizer:
             optimiser.load_state_dict(state_dict["optimiser"])
             self.step = state_dict["step"]
 
