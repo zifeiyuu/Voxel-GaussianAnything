@@ -60,8 +60,8 @@ def estimate_depth_scale_by_depthmap(depth, tgt_depth, max_depth=20):
     tgt_depth = tgt_depth.to(device)
     
     valid_mask = torch.logical_and((tgt_depth > eps), (tgt_depth < max_depth)).bool()
-    scale = (depth.squeeze()[valid_mask].log() - tgt_depth[valid_mask].log()).mean().exp()
-    # scale = depth.squeeze()[valid_mask].median() / tgt_depth[valid_mask].median()
+    # scale = (depth.squeeze()[valid_mask].log() - tgt_depth[valid_mask].log()).mean().exp()
+    scale = depth.squeeze()[valid_mask].median() / tgt_depth[valid_mask].median()
     return scale
 
 def estimate_depth_scale_bias(depth, tgt_depth, max_depth=20):

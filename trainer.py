@@ -165,7 +165,6 @@ class Trainer(nn.Module):
         bce_loss, rec_iou = self.compute_bce_loss(outputs)
         losses["loss/bce_loss"] = bce_loss
         losses["loss/rec_iou"] = rec_iou
-        losses["padding_number"] = outputs["padding_number"]
         total_loss += self.cfg.loss.bce.weight * bce_loss
         losses["loss/total"] = total_loss
 
@@ -294,18 +293,18 @@ class Trainer(nn.Module):
 
         for l, v in losses.items():
             logger.add_scalar(f"{mode}/{l}", v, self.step)
+        if not cfg.train.pretrain:
+            if cfg.model.gaussian_rendering:
+                logger.add_scalar(f"{mode}/gauss/scale/mean", torch.mean(outputs["gauss_scaling"]).item(), self.step)
 
-        if cfg.model.gaussian_rendering:
-            logger.add_scalar(f"{mode}/gauss/scale/mean", torch.mean(outputs["gauss_scaling"]).item(), self.step)
+                if self.cfg.model.predict_offset:
+                    offset_mag = torch.linalg.vector_norm(outputs["gauss_offset"], dim=1)
+                    mean_offset = offset_mag.mean()
+                    logger.add_scalar(f"{mode}/gauss/offset/mean", mean_offset.item(), self.step)
 
-            if self.cfg.model.predict_offset:
-                offset_mag = torch.linalg.vector_norm(outputs["gauss_offset"], dim=1)
-                mean_offset = offset_mag.mean()
-                logger.add_scalar(f"{mode}/gauss/offset/mean", mean_offset.item(), self.step)
-
-        if cfg.dataset.scale_pose_by_depth:
-            depth_scale = outputs[("depth_scale", 0)]
-            logger.add_scalar(f"{mode}/depth_scale", depth_scale.mean().item(), self.step)
+            if cfg.dataset.scale_pose_by_depth:
+                depth_scale = outputs[("depth_scale", 0)]
+                logger.add_scalar(f"{mode}/depth_scale", depth_scale.mean().item(), self.step)
 
 
     def log(self, mode, inputs, outputs):

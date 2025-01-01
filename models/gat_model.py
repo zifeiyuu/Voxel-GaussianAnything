@@ -36,34 +36,13 @@ def to_device(inputs, device):
             inputs[key] = ipt.to(device)
     return inputs
 
-class MLP(nn.Module):
-    def __init__(
-        self,
-        in_channels,
-        hidden_channels=None,
-        out_channels=None,
-        act_layer=nn.GELU,
-    ):
-        super().__init__()
-        out_channels = out_channels or in_channels
-        hidden_channels = hidden_channels or in_channels
-        self.fc1 = nn.Linear(in_channels, hidden_channels)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_channels, out_channels)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.fc2(x)
-        return x
-
 class GATModel(BaseModel):
     def __init__(self, cfg):
         super().__init__(cfg)
 
         self.cfg = cfg
+        self.pre_train_flag = cfg.train.pretrain
         self.using_frames = [0] + cfg.model.gauss_novel_frames
-        self.pretrain_parameters = []
         self.parameters_to_train = []
 
         # define the model
@@ -76,22 +55,20 @@ class GATModel(BaseModel):
         self.voxel_size, self.pc_range, self.coarse_voxel_size = cfg.model.voxel_size, cfg.model.pc_range, cfg.model.coarse_voxel_size
         self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[64, 64], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
         self.parameters_to_train += [{"params": self.vfe.parameters()}]
-        self.pretrain_parameters += [{"params": self.vfe.parameters()}]
+
         
         self.vox_pred = VoxPredictor(cfg)
         self.parameters_to_train += self.vox_pred.get_parameter_groups()
-        self.pretrain_parameters += self.vox_pred.get_parameter_groups()
-
-        self.decoder_3d = PointTransformerDecoder(cfg)
-        self.parameters_to_train += self.decoder_3d.get_parameter_groups()
-        head_in_dim = self.decoder_3d.transformer.out_dim
-
-        self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
-        self.parameters_to_train += self.decoder_gs.get_parameter_groups()
         
-        self.mask_token = nn.Parameter(torch.zeros(1, 64), requires_grad=True)
-        torch.nn.init.normal_(self.mask_token, std=0.02)
-        self.parameters_to_train += [{"params": self.mask_token}]
+        if not self.pre_train_flag:
+            self.decoder_3d = PointTransformerDecoder(cfg)
+            self.parameters_to_train += self.decoder_3d.get_parameter_groups()
+            head_in_dim = self.decoder_3d.transformer.out_dim
+
+        
+        if not self.pre_train_flag:
+            self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
+            self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
 
         self.use_checkpoint = False
@@ -118,58 +95,31 @@ class GATModel(BaseModel):
         return padded_coors, voxel_centers
     
     def get_projected_points(self, inputs, outputs):
+        eps, max_depth = 1e-3, 20
         # we project points from target view and novel view
-        pts3d_batch = []
+        pts3d_batch, pts3d_src_batch = [], []
 
         for batch_idx in range(len(inputs[('depth_sparse', 0)])):    # outputs[('depth_pred', 0)]    inputs[('depth_sparse', 0)]
-            pts3d = []
+            pts3d, pts3d_src = [], []
             for frameid in self.using_frames:
                 depth, K = inputs[('depth_sparse', frameid)][batch_idx], inputs[('K_tgt', frameid)][batch_idx]
                 c2w = outputs[('cam_T_cam', frameid, 0)][batch_idx] if frameid != 0 else None
+                
+                mask = torch.logical_and((depth > eps), (depth < max_depth)).bool()
+                depth[~mask] = max_depth
 
-                _pts3d, mask = depthmap_to_absolute_camera_coordinates_torch(depth, K, c2w)
+                _pts3d, _ = depthmap_to_absolute_camera_coordinates_torch(depth, K, c2w)
                 pts3d.append(_pts3d[mask])
-            pts3d = torch.cat(pts3d)
+                
+                if frameid == 0:
+                    pts3d_src.append(_pts3d.flatten(0, 1))
+                
+            pts3d, pts3d_src = torch.cat(pts3d), torch.cat(pts3d_src)
+            
             pts3d_batch.append(pts3d)
-        return pts3d_batch
+            pts3d_src_batch.append(pts3d_src)
+        return pts3d_batch, pts3d_src_batch
     
-    def get_projected_points_nomask(self, inputs, outputs):
-        # we project points from target view and novel view
-        pts3d_batch = []
-
-        for batch_idx in range(len(inputs[('depth_sparse', 0)])):    # outputs[('depth_pred', 0)]    inputs[('depth_sparse', 0)]
-            pts3d = []
-            for frameid in self.using_frames:
-                depth, K = inputs[('depth_sparse', frameid)][batch_idx], inputs[('K_tgt', frameid)][batch_idx]
-                c2w = outputs[('cam_T_cam', frameid, 0)][batch_idx] if frameid != 0 else None
-
-                _pts3d, mask = depthmap_to_absolute_camera_coordinates_torch(depth, K, c2w)
-                pts3d.append(rearrange(_pts3d, "h w c -> (h w) c"))
-            pts3d = torch.cat(pts3d)
-            pts3d_batch.append(pts3d)
-        return pts3d_batch
-    
-    def get_projected_points_source_view(self, inputs, outputs):
-        # project points from source view
-        pts3d_batch = []
-
-        for batch_idx in range(len(inputs[('depth_sparse', 0)])):    # outputs[('depth_pred', 0)]    inputs[('depth_sparse', 0)]
-            depth, K = inputs[('depth_sparse', 0)][batch_idx], inputs[('K_tgt', 0)][batch_idx]
-            c2w = None
-            _pts3d, mask = depthmap_to_absolute_camera_coordinates_torch(depth, K, c2w)
-            pts3d_batch.append(_pts3d[mask])
-        return pts3d_batch
-    
-    def get_projected_points_source_view_nomask(self, inputs, outputs):
-        # project points from source view
-        pts3d_batch = []
-
-        for batch_idx in range(len(inputs[('depth_sparse', 0)])):    # outputs[('depth_pred', 0)]    inputs[('depth_sparse', 0)]
-            depth, K = inputs[('depth_sparse', 0)][batch_idx], inputs[('K_tgt', 0)][batch_idx]
-            c2w = None
-            _pts3d, mask = depthmap_to_absolute_camera_coordinates_torch(depth, K, c2w)
-            pts3d_batch.append(rearrange(_pts3d, "h w c -> (h w) c"))
-        return pts3d_batch
     
     def get_binary_voxels(self, points):
         coors, voxel_centers = compute_voxel_coors_and_centers(points, voxel_size=self.coarse_voxel_size, point_cloud_range=self.pc_range)
@@ -180,9 +130,58 @@ class GATModel(BaseModel):
         binary_canvas[:, coors[:,1], coors[:,2], coors[:,3]] = 1
 
         return binary_canvas
-        
-        
+    
     def forward(self, inputs):
+        if self.pre_train_flag:
+            output = self.forward_voxpred(inputs)
+        else:
+            output = self.forward_gsm(inputs)
+            
+        return output
+        
+    def forward_voxpred(self, inputs):
+        cfg = self.cfg
+        # we predict points and associated features in 3d space directly
+        # we do not use unprojection, so as camera intrinsics
+        outputs = {}
+        # TODO: Add multive image and voxel predictor 
+        self.encoder(inputs, outputs) # (B, N, 3), (B, N, C), (B, N, 3)
+
+        if cfg.model.gaussian_rendering:
+            self.process_gt_poses(inputs, outputs)
+        # First, Voxelization and decode pre-batch data here
+        # get pre-batch point cloud here!
+        if self.training:
+            # gt_points = self.get_projected_points(inputs, outputs)
+            gt_points, gt_points_src = self.get_projected_points(inputs, outputs)
+        else:
+            gt_points = None
+        binary_logits, binary_voxel = [], []
+
+        for b in range(cfg.data_loader.batch_size):
+
+            pts3d_origin, pts_enc_feat, pts_rgb = outputs[('pts3d', 0)], outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]
+            
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_src[b], pts_enc_feat[b], pts_rgb[b], voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            voxels_features = self.vfe(features, num_points, coors)
+            
+            # TODO: We need a corase voxel predictor
+            batch_binary_logits, _ = self.vox_pred(voxels_features, coors)
+            # get gt corase voxel here
+            if self.training:
+                batch_binary_voxel = self.get_binary_voxels(gt_points_src[b]).float()
+            else:
+                batch_binary_voxel = torch.zeros_like(batch_binary_logits)
+                
+            binary_voxel.append(batch_binary_voxel)
+            binary_logits.append(batch_binary_logits)
+            
+        # save binary_voxel and binary_logits
+        binary_logits, binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0)
+        outputs["binary_logits"], outputs["binary_voxel"] = binary_logits, binary_voxel
+        return outputs
+        
+    def forward_gsm(self, inputs):
         cfg = self.cfg
         # we predict points and associated features in 3d space directly
         # we do not use unprojection, so as camera intrinsics

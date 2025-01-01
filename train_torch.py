@@ -39,17 +39,6 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                 inputs[k] = v.to(local_rank, non_blocking=True)
         
         losses, outputs = trainer(inputs)
-
-        if batch_idx == 0:
-            print(f"Num of gaussian: {outputs['gauss_means'].shape[-1]}")
-
-        # if not trainer.model.module.decoder_3d.transformer.backbone.skip:
-        #     # Scale losses by accumulation steps
-        #     loss_total = losses["loss/total"] / accumulation_steps            
-        # else:
-        #     # skip this iter, avoid crash
-        #     print(f"Masking gradients: batch_idx = {batch_idx}, transformer serialization depth exceeds the limit (16)")
-        #     loss_total = losses["loss/total"] - losses["loss/total"]  # Set loss to zero
             
         loss_total = losses["loss/total"] / accumulation_steps           
 
@@ -96,11 +85,11 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                         trainer.model.module.save_model(optimiser, step, ema)
                     else:
                         trainer.model.save_model(optimiser, step, ema)
-
-            if step != 0 and (early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
-                with torch.no_grad():
-                    model_eval = ema if ema is not None else trainer.model
-                    trainer.validate(model_eval, evaluator, val_loader, device='cuda')
+            if not cfg.train.pretrain:
+                if step != 0 and (early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
+                    with torch.no_grad():
+                        model_eval = ema if ema is not None else trainer.model
+                        trainer.validate(model_eval, evaluator, val_loader, device='cuda')
 
         # Clean up and free GPU memory
         if early_phase or step % cfg.run.val_frequency == 0 or step % 100 == 0:
@@ -148,15 +137,7 @@ def main(cfg: DictConfig):
         model.to(local_rank), device_ids=[local_rank], find_unused_parameters=True)
     
     # set up optimiser
-    if pretrain:
-        optimiser = optim.Adam(model.pretrain_parameters, cfg.optimiser.learning_rate)
-    else:
-        # Freeze pretrained parameters
-        if cfg.train.freeze_pretrain:
-            for param_group in model.pretrain_parameters:
-                for param in param_group["params"]:
-                    param.requires_grad = False
-        optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
+    optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
 
     num_warmup_steps = cfg.optimiser.num_warmup_steps
     max_training_steps = cfg.optimiser.max_training_steps
