@@ -17,6 +17,7 @@ from misc.util import add_source_frame_id
 from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, depthmap_to_absolute_camera_coordinates_torch
 from misc.visualise_3d import storePly # for debugging
 import numpy as np
+from torch_scatter import scatter_max
 
 from .decoder.pointcloud_decoder import PointTransformerDecoder
 from .decoder.voxel_predictor import VoxPredictor
@@ -53,6 +54,7 @@ class GATModel(BaseModel):
         head_in_dim = [cfg.model.backbone.pts_feat_dim]
 
         self.voxel_size, self.pc_range, self.coarse_voxel_size = cfg.model.voxel_size, cfg.model.pc_range, cfg.model.coarse_voxel_size
+        self.voxel_size_factor = cfg.model.coarse_voxel_size // cfg.model.voxel_size
         self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[64, 64], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
         self.parameters_to_train += [{"params": self.vfe.parameters()}]
 
@@ -95,12 +97,14 @@ class GATModel(BaseModel):
         return padded_coors, voxel_centers
     
     def get_projected_points(self, inputs, outputs):
-        eps, max_depth = 1e-3, 20
+        eps, max_depth = 1e-3, 30
         # we project points from target view and novel view
-        pts3d_batch, pts3d_src_batch = [], []
+        pts3d_batch = []
+        pts3d_dict_batch = []
 
         for batch_idx in range(len(inputs[('depth_sparse', 0)])):    # outputs[('depth_pred', 0)]    inputs[('depth_sparse', 0)]
-            pts3d, pts3d_src = [], []
+            pts3d = []
+            pts3d_dict = {}
             for frameid in self.using_frames:
                 depth, K = inputs[('depth_sparse', frameid)][batch_idx], inputs[('K_tgt', frameid)][batch_idx]
                 c2w = outputs[('cam_T_cam', frameid, 0)][batch_idx] if frameid != 0 else None
@@ -111,14 +115,13 @@ class GATModel(BaseModel):
                 _pts3d, _ = depthmap_to_absolute_camera_coordinates_torch(depth, K, c2w)
                 pts3d.append(_pts3d[mask])
                 
-                if frameid == 0:
-                    pts3d_src.append(_pts3d.flatten(0, 1))
+                pts3d_dict[frameid] = _pts3d.flatten(0, 1)
                 
-            pts3d, pts3d_src = torch.cat(pts3d), torch.cat(pts3d_src)
+            pts3d = torch.cat(pts3d)
             
             pts3d_batch.append(pts3d)
-            pts3d_src_batch.append(pts3d_src)
-        return pts3d_batch, pts3d_src_batch
+            pts3d_dict_batch.append(pts3d_dict)
+        return pts3d_batch, pts3d_dict_batch
     
     
     def get_binary_voxels(self, points):
@@ -130,6 +133,21 @@ class GATModel(BaseModel):
         binary_canvas[:, coors[:,1], coors[:,2], coors[:,3]] = 1
 
         return binary_canvas
+    
+    def voxel_max_pooling(self, voxels_features, coors):
+        batch = coors[:, 0]
+        z = coors[:, 1] // self.voxel_size_factor
+        x = coors[:, 2] // self.voxel_size_factor
+        y = coors[:, 3] // self.voxel_size_factor
+        
+        coors_reduced = torch.stack([batch, z, x, y], dim=-1)  # [N, 4]
+
+        unique_coors, inverse_indices = torch.unique(coors_reduced, return_inverse=True, dim=0)
+
+        new_voxels_features, _ = scatter_max(voxels_features, inverse_indices, dim=0)
+        new_coors = unique_coors
+        
+        return new_voxels_features, new_coors
     
     def forward(self, inputs):
         if self.pre_train_flag:
@@ -153,32 +171,70 @@ class GATModel(BaseModel):
         # get pre-batch point cloud here!
         if self.training:
             # gt_points = self.get_projected_points(inputs, outputs)
-            gt_points, gt_points_src = self.get_projected_points(inputs, outputs)
+            gt_points, gt_points_dict = self.get_projected_points(inputs, outputs)
         else:
             gt_points = None
-        binary_logits, binary_voxel = [], []
 
+        binary_logits, binary_voxel, pred_feat = [], [], []
+        mean_feat = []
         for b in range(cfg.data_loader.batch_size):
 
-            pts3d_origin, pts_enc_feat, pts_rgb = outputs[('pts3d', 0)], outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]
-            
-            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_src[b], pts_enc_feat[b], pts_rgb[b], voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            pts3d_moge, pts_enc_feat, pts_rgb = outputs[('pts3d', 0)], outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]
+    
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_dict[b][0], pts_enc_feat[b], pts_rgb[b], voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
             voxels_features = self.vfe(features, num_points, coors)
-            
+
             # TODO: We need a corase voxel predictor
-            batch_binary_logits, _ = self.vox_pred(voxels_features, coors)
+            ### TODO: 加一个feature output 所有 voxel 都有###
+            batch_binary_logits, b_v, batch_pred_feat = self.vox_pred(voxels_features, coors)  # batch_pred_feat (B, Z, Y, X, 64)
             # get gt corase voxel here
             if self.training:
                 batch_binary_voxel = self.get_binary_voxels(gt_points[b]).float()
             else:
                 batch_binary_voxel = torch.zeros_like(batch_binary_logits)
-                
+
+            ### 加gt binary mask ###
+            batch_pred_feat = batch_pred_feat[batch_binary_voxel == 1.0]
+
             binary_voxel.append(batch_binary_voxel)
             binary_logits.append(batch_binary_logits)
+            pred_feat.append(batch_pred_feat)
+            mean_feat.append(features.mean())
+
+        gt_feat = []
+        gt_mean_feat = []
+        for b in range(cfg.data_loader.batch_size):
+            batch_3d, batch_feat, batch_rgb = [], [], []
+            for frame_id in [0] + list(cfg.model.gauss_novel_frames):
+                batch_3d.append(gt_points_dict[b][frame_id])
+                batch_feat.append(outputs[('pts_feat', frame_id)][b])
+                batch_rgb.append(outputs[('pts_rgb', frame_id)][b])
+
+            batch_3d = torch.cat(batch_3d)
+            batch_feat = torch.cat(batch_feat)
+            batch_rgb = torch.cat(batch_rgb)
+
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(batch_3d, batch_feat, batch_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            
+            voxels_features = self.vfe(features, num_points, coors)
+            ### fine to coarse ###
+            voxels_features, coors = self.voxel_max_pooling(voxels_features, coors)
+
+            ### TODO: 需要binary mask掉空气 ??? ###
+            voxel_values = binary_voxel[b][coors[:, 0].long(), coors[:, 1].long(), coors[:, 2].long(), coors[:, 3].long()]  # Shape: (N,)
+            valid_mask = voxel_values == 1 
+            filtered_coors = coors[valid_mask]
+            filtered_feat = voxels_features[valid_mask]
+
+            ### TODO: 需要出一个全体的voxel feature作为GT, 数量要和上面predicted feature 一致 ###
+            gt_feat.append(filtered_feat)
+            gt_mean_feat.append(features.mean())
             
         # save binary_voxel and binary_logits
         binary_logits, binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0)
         outputs["binary_logits"], outputs["binary_voxel"] = binary_logits, binary_voxel
+        outputs["pred_feat"], outputs["gt_feat"]= pred_feat, gt_feat
+        outputs["feat_mean"], outputs["gt_feat_mean"] = mean_feat, gt_mean_feat
         return outputs
         
     def forward_gsm(self, inputs):
@@ -195,9 +251,7 @@ class GATModel(BaseModel):
         # get pre-batch point cloud here!
         if self.training:
             # gt_points = self.get_projected_points(inputs, outputs)
-            gt_points = self.get_projected_points_nomask(inputs, outputs)
-            gt_points_source = self.get_projected_points_source_view(inputs, outputs)
-            gt_points_source_nomask = self.get_projected_points_source_view_nomask(inputs, outputs)
+            gt_points, gt_points_dict = self.get_projected_points(inputs, outputs)
         else:
             gt_points = None
         all_batch_outputs, binary_logits, binary_voxel = [], [], []
@@ -205,16 +259,16 @@ class GATModel(BaseModel):
 
         for b in range(cfg.data_loader.batch_size):
 
-            pts3d_origin, pts_enc_feat, pts_rgb = outputs[('pts3d', 0)], outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]
+            pts3d_moge, pts_enc_feat, pts_rgb = outputs[('pts3d', 0)], outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]
 
-            # xyz = pts3d_origin[0].cpu().numpy() 
+            # xyz = pts3d_moge[0].cpu().numpy() 
             # storePly("/mnt/ziyuxiao/code/GaussianAnything/output/origin.ply", xyz, np.zeros(xyz.shape, dtype=np.uint8))
             # xyz = gt_points_source[0].cpu().numpy() 
             # storePly("/mnt/ziyuxiao/code/GaussianAnything/output/gt.ply", xyz, np.zeros(xyz.shape, dtype=np.uint8))
             # xyz = gt_points_source_nomask[0].cpu().numpy() 
             # storePly("/mnt/ziyuxiao/code/GaussianAnything/output/gt_nomask.ply", xyz, np.zeros(xyz.shape, dtype=np.uint8))
 
-            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_source_nomask[b], pts_enc_feat[b], pts_rgb[b], voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts3d_moge[b], pts_enc_feat[b], pts_rgb[b], voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
             voxels_features = self.vfe(features, num_points, coors)
             
             # TODO: We need a corase voxel predictor
@@ -225,11 +279,11 @@ class GATModel(BaseModel):
             else:
                 batch_binary_voxel = torch.zeros_like(batch_binary_logits)
 
-            padded_coors, padded_voxel_centers = self.padding_voxel_maxpooling(coors, (batch_binary_logits.sigmoid() > 0.5).float())
-            padding_number += padded_coors.shape[0]
-            padding_tokens = self.mask_token.repeat(padded_coors.shape[0], 1)
-            voxels_features = torch.cat([voxels_features, padding_tokens], dim=0)
-            voxel_centers = torch.cat([voxel_centers, padded_voxel_centers], dim=0)
+            # padded_coors, padded_voxel_centers = self.padding_voxel_maxpooling(coors, (batch_binary_logits.sigmoid() > 0.5).float())
+            # padding_number += padded_coors.shape[0]
+            # padding_tokens = self.mask_token.repeat(padded_coors.shape[0], 1)
+            # voxels_features = torch.cat([voxels_features, padding_tokens], dim=0)
+            # voxel_centers = torch.cat([voxel_centers, padded_voxel_centers], dim=0)
 
             voxel_centers = voxel_centers.unsqueeze(0)
             voxels_features = voxels_features.unsqueeze(0)

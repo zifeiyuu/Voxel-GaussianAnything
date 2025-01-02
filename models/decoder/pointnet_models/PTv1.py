@@ -315,7 +315,7 @@ class PointTransformerV1(nn.Module):
         p3, x3, o3 = self.enc3([p2, x2, o2])
         p4, x4, o4 = self.enc4([p3, x3, o3])
         p5, x5, o5 = self.enc5([p4, x4, o4])
-        embed()
+
         x5 = self.dec5[1:]([p5, self.dec5[0]([p5, x5, o5]), o5])[1]
         x4 = self.dec4[1:]([p4, self.dec4[0]([p4, x4, o4], [p5, x5, o5]), o4])[1]
         x3 = self.dec3[1:]([p3, self.dec3[0]([p3, x3, o3], [p4, x4, o4]), o3])[1]

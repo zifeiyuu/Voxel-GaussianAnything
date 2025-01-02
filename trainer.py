@@ -163,14 +163,38 @@ class Trainer(nn.Module):
             
         return bce_loss, rec_iou
     
+    def compute_feature_loss(self, outputs):
+        pred_feat, gt_feat = outputs["pred_feat"], outputs["gt_feat"]  # (N, 64), (N, 64)
+        feature_loss = 0
+        for b in range(len(pred_feat)):
+            assert pred_feat[b].shape == gt_feat[b].shape, "Shapes of predicted and gt features must match"
+            feature_loss += F.mse_loss(pred_feat[b], gt_feat[b], reduction="mean")
+
+        return feature_loss
+    
     def compute_pretraining_loss(self, outputs):
         losses = {}
         total_loss = 0.0
 
-        bce_loss, rec_iou = self.compute_bce_loss(outputs)
-        losses["loss/bce_loss"] = bce_loss
-        losses["loss/rec_iou"] = rec_iou
-        total_loss += self.cfg.loss.bce.weight * bce_loss
+        if self.cfg.loss.bce.weight > 0:
+            bce_loss, rec_iou = self.compute_bce_loss(outputs)
+            losses["loss/bce_loss"] = bce_loss
+            losses["loss/rec_iou"] = rec_iou
+            total_loss += self.cfg.loss.bce.weight * bce_loss
+
+        if self.cfg.loss.feature.weight > 0:
+            if self.cfg.loss.feature.mode != "mean":
+                feature_loss = self.compute_feature_loss(outputs)
+                losses["loss/feature_loss"] = feature_loss
+                total_loss += self.cfg.loss.feature.weight * feature_loss
+            else:
+                feature_loss = 0
+                mean_feat, gt_mean_feat = outputs["feat_mean"], outputs["gt_feat_mean"]
+                for b in range(len(mean_feat)):
+                    feature_loss += F.mse_loss(mean_feat[b], gt_mean_feat[b], reduction="mean")
+                losses["loss/feature_loss"] = feature_loss
+                total_loss += self.cfg.loss.feature.weight_mean * feature_loss
+            
         losses["loss/total"] = total_loss
 
         return losses

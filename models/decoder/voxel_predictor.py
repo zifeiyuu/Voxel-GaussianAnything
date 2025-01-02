@@ -5,7 +5,7 @@ import numpy as np
 from torch_scatter import scatter_max
 
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
-
+from IPython import embed
 
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
@@ -213,6 +213,7 @@ class DiT(nn.Module):
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
+        self.final_layer_feat = FinalLayer(hidden_size, patch_size, self.out_channels*64)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -252,7 +253,22 @@ class DiT(nn.Module):
         x = torch.einsum('nhwpqc->nchpwq', x)
         imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
         return imgs
+    
+    def unpatchify_feat(self, x):
+        """
+        x: (N, T, patch_size**2 * C * 64)
+        imgs: (N, H, W, C, 64)
+        """
+        c = self.out_channels
+        p = self.x_embedder.patch_size[0]
+        h = w = int(x.shape[1] ** 0.5)
+        assert h * w == x.shape[1]
 
+        x = x.reshape(shape=(x.shape[0], h, w, p, p, c, 64))
+        x = torch.einsum('nhwpqck->nchpwqk', x)
+        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p, 64))
+        return imgs
+    
     def forward(self, x):
         """
         Forward pass of DiT.
@@ -264,10 +280,12 @@ class DiT(nn.Module):
 
         for block in self.blocks:
             x = block(x)                      # (N, T, D)
-        x = self.final_layer(x)                # (N, T, patch_size ** 2 * out_channels)
-        x = self.unpatchify(x)                   # (N, out_channels, H, W)
-        return x
+        feat = self.final_layer_feat(x)
+        feat = self.unpatchify_feat(feat) 
+        x_out = self.final_layer(x)                # (N, T, patch_size ** 2 * out_channels)
+        x_out = self.unpatchify(x_out)                   # (N, out_channels, H, W)
 
+        return x_out, feat
     
     
 class VoxPredictor(nn.Module):
@@ -308,9 +326,9 @@ class VoxPredictor(nn.Module):
 
         voxel_feature, binary_voxel = self.pts_middle_encoder(vfe_feat, coor, 1)
         
-        pred_binary_logits = self.dit_transformer(voxel_feature)
+        pred_binary_logits, pred_feat = self.dit_transformer(voxel_feature)
         
-        return pred_binary_logits, binary_voxel
+        return pred_binary_logits, binary_voxel, pred_feat
         
         
     def get_parameter_groups(self):

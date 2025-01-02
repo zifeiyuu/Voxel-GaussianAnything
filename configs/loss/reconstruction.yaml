@@ -11,3 +11,8 @@ lpips:
 
 bce:
   weight: 100
+
+feature:
+  mode: # "mean"
+  weight: 20
+  weight_mean: 1e6
