@@ -276,23 +276,10 @@ class BaseModel(nn.Module):
             ckpts = sorted(list(weights_path.glob("model_*.pth")), reverse=True)
             weights_path = ckpts[ckpt_ids]
         logging.info(f"Loading weights from {weights_path}...")
-
+        
         state_dict = torch.load(weights_path, map_location=torch.device(device))
         model_dict = state_dict["model"]
-        new_dict = {}
-        if pretraining:
-            # Load only pretraining parts
-            for k, v in model_dict.items():
-                if "vfe" in k or "vox_pred" in k:
-                    new_dict[k] = v.clone()
-        else:
-            # Load the entire model
-            for k, v in model_dict.items():
-                if "backproject_depth" in k:
-                    new_dict[k] = self.state_dict()[k].clone()
-                else:
-                    new_dict[k] = v.clone()
-        self.load_state_dict(new_dict, strict=False)
+        self.load_state_dict(model_dict, strict=False)
         
         # loading adam state
         if optimiser is not None and load_optimizer:

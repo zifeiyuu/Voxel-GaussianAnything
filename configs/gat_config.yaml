@@ -6,11 +6,11 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "pretrain_pred_base" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
+  exp_name: "debug" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 8
+  batch_size: 1
   num_workers: 16
 
 train:
@@ -47,9 +47,9 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 1000
-  save_frequency: 1000
-  val_frequency: 1000
+  log_frequency: 10
+  save_frequency: 10
+  val_frequency: 10
   num_keep_ckpts: 5
 
 #new

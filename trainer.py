@@ -47,8 +47,13 @@ class Trainer(nn.Module):
 
     def set_logger(self, cfg, name='torch'):
         if name == 'torch':
-            logging.info(f"Tensorboard dir: {os.path.join(self.output_path, 'tensorboard', cfg.config['exp_name'])}")
-            self.logger = SummaryWriter(log_dir=str(self.output_path / 'tensorboard' / cfg.config['exp_name']))
+            if self.pretrain:
+                logdir = os.path.join(self.output_path, 'tensorboard', cfg.config['exp_name'], "preatrian")
+            else:
+                logdir = os.path.join(self.output_path, 'tensorboard', cfg.config['exp_name'], "gsm")
+                
+            logging.info(f"Tensorboard dir: {logdir}")
+            self.logger = SummaryWriter(log_dir=logdir)
         elif name == 'fabric':
             self.logger = SummaryWriter(log_dir=str(self.output_path / 'tensorboard' / str(time.time()))) #only used for fabric train
         else:

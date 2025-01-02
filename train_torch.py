@@ -74,17 +74,20 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
             if step % cfg.run.save_frequency == 0 and step != 0:
                 if cfg.train.pretrain:
                     base_dir = Path(__file__).resolve().parent
-                    out_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain_ckpt"
+                    out_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain" / "pretrain_ckpt"
 
                     if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
                         trainer.model.module.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
                     else:
                         trainer.model.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
                 else:
+                    base_dir = Path(__file__).resolve().parent
+                    out_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "gsm" / "pretrain_ckpt"
+                    
                     if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
-                        trainer.model.module.save_model(optimiser, step, ema)
+                        trainer.model.module.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
                     else:
-                        trainer.model.save_model(optimiser, step, ema)
+                        trainer.model.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
             if not cfg.train.pretrain:
                 if step != 0 and (early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
                     with torch.no_grad():
@@ -196,8 +199,8 @@ def main(cfg: DictConfig):
     else:
         if cfg.train.load_pretrain:
             base_dir = Path(__file__).resolve().parent
-            load_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain_ckpt"
-            model.load_model(load_dir, optimiser=optimiser, pretraining=True, load_optimizer=False)
+            load_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain" / "pretrain_ckpt"
+            model.load_model(load_dir, optimiser=optimiser, pretraining=True, load_optimizer=False, ckpt_ids=1)
             print(f"Train using existing checkpoint from {load_dir}")
         else:
             if (ckpt_dir := model.checkpoint_dir()).exists():
