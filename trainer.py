@@ -45,6 +45,11 @@ class Trainer(nn.Module):
         self.output_path = base_dir / cfg.output_path
         self.output_path.resolve()
 
+        self.warmup = cfg.train.pretrain_warmup > 0
+
+    def set_warmup(self, warmup):
+        self.warmup = warmup
+
     def set_logger(self, cfg, name='torch'):
         if name == 'torch':
             if self.pretrain:
@@ -169,7 +174,7 @@ class Trainer(nn.Module):
         for b in range(len(pred_feat)):
             assert pred_feat[b].shape == gt_feat[b].shape, "Shapes of predicted and gt features must match"
             feature_loss += F.mse_loss(pred_feat[b], gt_feat[b], reduction="mean")
-
+        feature_loss /= len(pred_feat)
         return feature_loss
     
     def compute_pretraining_loss(self, outputs):
@@ -182,7 +187,7 @@ class Trainer(nn.Module):
             losses["loss/rec_iou"] = rec_iou
             total_loss += self.cfg.loss.bce.weight * bce_loss
 
-        if self.cfg.loss.feature.weight > 0:
+        if self.cfg.loss.feature.weight > 0 and not self.warmup:
             if self.cfg.loss.feature.mode != "mean":
                 feature_loss = self.compute_feature_loss(outputs)
                 losses["loss/feature_loss"] = feature_loss
@@ -192,6 +197,7 @@ class Trainer(nn.Module):
                 mean_feat, gt_mean_feat = outputs["feat_mean"], outputs["gt_feat_mean"]
                 for b in range(len(mean_feat)):
                     feature_loss += F.mse_loss(mean_feat[b], gt_mean_feat[b], reduction="mean")
+                feature_loss /= len(mean_feat) 
                 losses["loss/feature_loss"] = feature_loss
                 total_loss += self.cfg.loss.feature.weight_mean * feature_loss
             

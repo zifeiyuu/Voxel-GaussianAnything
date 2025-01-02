@@ -97,7 +97,7 @@ class GATModel(BaseModel):
         return padded_coors, voxel_centers
     
     def get_projected_points(self, inputs, outputs):
-        eps, max_depth = 1e-3, 30
+        eps, max_depth = 1e-3, 20
         # we project points from target view and novel view
         pts3d_batch = []
         pts3d_dict_batch = []

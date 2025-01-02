@@ -62,6 +62,10 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
 
         # Update step and log
         step = trainer.step
+        # set warm up
+        if step > cfg.train.pretrain_warmup and trainer.warmup:
+            print("pretrain warmup ends, add feature loss")
+            trainer.set_warmup(False)
 
         early_phase = batch_idx % trainer.cfg.run.log_frequency == 0 and step < 10000
         learning_rate = lr_scheduler.get_lr()

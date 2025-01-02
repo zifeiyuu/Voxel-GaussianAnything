@@ -15,6 +15,7 @@ data_loader:
 
 train:
   pretrain: true
+  pretrain_warmup: 10000
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
   num_gpus: 1 #[1, 2, 3, 4, 5, 6]
