@@ -24,7 +24,7 @@ copy_to_local: true
 color_aug: false
 skip_bad_shape: true
 dilation: random
-max_dilation: 1 #choose random target frame, maximum gap
+max_dilation: 2 #choose random target frame, maximum gap
 pad_border_aug: 0 # 32 0
 normalize: false
 subset: -1  # use subset frames for small set overfitting

@@ -169,7 +169,7 @@ class GATModel(BaseModel):
             batch_binary_logits, _ = self.vox_pred(voxels_features, coors)
             # get gt corase voxel here
             if self.training:
-                batch_binary_voxel = self.get_binary_voxels(gt_points_src[b]).float()
+                batch_binary_voxel = self.get_binary_voxels(gt_points[b]).float()
             else:
                 batch_binary_voxel = torch.zeros_like(batch_binary_logits)
                 
