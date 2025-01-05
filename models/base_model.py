@@ -248,7 +248,7 @@ class BaseModel(nn.Module):
             # Save only the pretraining parts
             model_state = {
                 k: v for k, v in model.state_dict().items()
-                if "vfe" in k or "vox_pred" in k
+                if "vfe" in k or "vox_pred" in k or "decoder_gs_padding" in k
             }
         else:
             model_state = model.state_dict()

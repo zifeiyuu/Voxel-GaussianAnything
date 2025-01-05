@@ -1,7 +1,7 @@
 name: scannetpp
 split: original
 mode: dslr
-data_path: /mnt/datasets/scannetpp_processed  #/data/datasets/re10k
+data_path: /mnt/datasets/scannetpp_v2/processed  #/data/datasets/re10k   #/mnt/datasets/scannetpp_processed
 depth_path: #/data/datasets/re10k
 unpack_pcl_tar: false
 preload_depths: false

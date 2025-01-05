@@ -50,13 +50,17 @@ def process_scenes(root, original_dir, output_dir):
     count = 0
     output_dir = Path(output_dir)
     os.makedirs(output_dir, exist_ok=True)
-    scenes = [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)) and len(d) == 10]
+    scenes = [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
     print(scenes)
-
+    print(len(scenes))
+    bad_scene = ['c29b5e479c']
     all_data = {'train': {}, 'test': {}}  # Dictionary to hold all data
 
     for scene in tqdm(scenes, position=0, leave=True): 
         print(scene)
+        if scene in bad_scene:
+            print(f"skip bad scene: {scene}")
+            continue
         all_data['train'][scene] = []
         all_data['test'][scene] = []
         data_dir = os.path.join(root, scene)
@@ -117,7 +121,7 @@ def process_scenes(root, original_dir, output_dir):
     print(f"error: {count}")
 
 if __name__ == '__main__':
-    root = '/mnt/datasets/scannetpp_processed'
-    original_dir = '/mnt/datasets/scannetpp'
-    output_dir = '/mnt/datasets/scannetpp_processed'
+    root = '/mnt/datasets/scannetpp_v2/processed/dslr'
+    original_dir = '/mnt/datasets/scannetpp_v2'
+    output_dir = '/mnt/datasets/scannetpp_v2/processed/dslr'
     process_scenes(root, original_dir, output_dir)

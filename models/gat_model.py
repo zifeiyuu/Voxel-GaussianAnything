@@ -69,11 +69,22 @@ class GATModel(BaseModel):
         if self.pre_train_flag:
             head_in_dim = [64]
 
-        self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
-        self.parameters_to_train += self.decoder_gs.get_parameter_groups()
+        self.decoder_gs_padding = LinearHead(cfg, [cfg.model.voxel_feat_dim], xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
+        self.parameters_to_train += self.decoder_gs_padding.get_parameter_groups()
+
+        if not self.pre_train_flag:
+            self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
+            self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
         self.use_checkpoint = False
         self.use_reentrant = False
+
+        if not self.pre_train_flag:
+            # Freeze pretrained parameters
+            if cfg.train.freeze_pretrain:
+                for name, param in self.named_parameters():
+                    if "vfe" in name or "vox_pred" in name:
+                        param.requires_grad = False 
 
     def padding_voxel_maxpooling(self, coors, padded_voxels):
         # WARNING! This function only take bs=1 inout, i.e., the first dim of coords should always be zero
@@ -105,9 +116,11 @@ class GATModel(BaseModel):
         )
         binary_canvas = torch.zeros(1, 1, canvs_size[2], canvs_size[1], canvs_size[0], dtype=coors.dtype, device=coors.device)
         binary_canvas[:, :, coors[:, 1], coors[:, 2], coors[:, 3]] = 1
-        
-        pooled_binary_canvs = F.interpolate(padded_voxels.unsqueeze(1), size=binary_canvas.shape[2:], mode="nearest").int().squeeze(1)
-        pooled_feat_canvas = F.interpolate(pred_feats.permute(0, 4, 1, 2, 3), size=binary_canvas.shape[2:], mode="nearest").permute(0, 2, 3, 4, 1) 
+
+        # pooled_binary_canvs = F.interpolate(padded_voxels.unsqueeze(1), size=binary_canvas.shape[2:], mode="nearest").int().squeeze(1)
+        # pooled_feat_canvas = F.interpolate(pred_feats.permute(0, 4, 1, 2, 3), size=binary_canvas.shape[2:], mode="nearest").permute(0, 2, 3, 4, 1) 
+        pooled_binary_canvs = padded_voxels
+        pooled_feat_canvas = pred_feats
         padded_binary_canvs = (pooled_binary_canvs - binary_canvas.squeeze(1)).clamp(min=0)
 
         original_coors = torch.nonzero(binary_canvas.squeeze(1) == 1, as_tuple=False)  # Shape: [N, 4]
@@ -209,8 +222,7 @@ class GATModel(BaseModel):
         # get pre-batch point cloud here!
         gt_points, gt_points_dict = self.get_projected_points(inputs, outputs)
 
-        binary_logits, binary_voxel = [], []
-        all_batch_outputs = []
+        all_batch_outputs, binary_logits, binary_voxel = [], [], []
         padding_number = 0
         for b in range(cfg.data_loader.batch_size):
             # ONLY SRC VIEW VOXELS HERE
@@ -221,25 +233,26 @@ class GATModel(BaseModel):
             # TODO: We need a corase voxel predictor
             ### TODO: 加一个feature output 所有 voxel 都有###
             # SRC + NOVEL VIEW VOXELS(PREDICTED)
-            batch_binary_logits, b_v, batch_pred_feat = self.vox_pred(voxels_features, coors)  # batch_pred_feat (B, Z, Y, X, 64)
+            batch_binary_logits, _, batch_pred_feat = self.vox_pred(voxels_features, coors)  # batch_pred_feat (B, Z, Y, X, 64)
             # get gt corase voxel here
 
             batch_binary_voxel, batch_gt_voxel_centers = self.get_binary_voxels(gt_points[b])
             batch_binary_voxel = batch_binary_voxel.float()
             batch_gt_voxel_centers = batch_gt_voxel_centers.float()
 
-            ### 加gt binary mask ###
+            ### 加gt binary mask ###  
+            ### Difference: train 的时候用 batch_binary_logits ###
             batch_pred_feat = batch_pred_feat[batch_binary_voxel == 1.0]
 
-            ## 用batch_binary_logits mask ## pretrain 先用gt
-            # all_coors, all_voxel_centers, all_feats = self.padding_voxel_maxpooling_coarse(coors, (batch_binary_logits.sigmoid() > 0.5).float(), batch_pred_feat)
-            # padding_number += (all_coors.shape[0] - coors.shape[0])
+            ### 用 <src fine> combine <predicted coarse> 为了render时候增加voxel数量？
+            voxel_centers = torch.cat([voxel_centers, batch_gt_voxel_centers])
+            voxels_features = torch.cat([voxels_features, batch_pred_feat])
 
-            output_batch = self.decoder_gs([batch_pred_feat])
+            output_batch = self.decoder_gs_padding([voxels_features])
             offset = output_batch["gauss_offset"]
             offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
-            batch_gt_voxel_centers = batch_gt_voxel_centers.unsqueeze(0) + offset
-            pts3d_reshape = rearrange(batch_gt_voxel_centers, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
+            voxel_centers = voxel_centers.unsqueeze(0) + offset
+            pts3d_reshape = rearrange(voxel_centers, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
             output_batch["gauss_means"] = pts3d_reshape
 
             all_batch_outputs.append(output_batch)
@@ -273,10 +286,10 @@ class GATModel(BaseModel):
         # First, Voxelization and decode pre-batch data here
         # get pre-batch point cloud here!
         if self.training:
-            # gt_points = self.get_projected_points(inputs, outputs)
-            gt_points, gt_points_dict = self.get_projected_points(inputs, outputs)
+            gt_points, _ = self.get_projected_points(inputs, outputs)
         else:
             gt_points = None
+
         all_batch_outputs, binary_logits, binary_voxel = [], [], []
         padding_number = 0
 
@@ -284,30 +297,38 @@ class GATModel(BaseModel):
 
             pts3d_moge, pts_enc_feat, pts_rgb = outputs[('pts3d', 0)], outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]
 
-            # xyz = pts3d_moge[0].cpu().numpy() 
-            # storePly("/mnt/ziyuxiao/code/GaussianAnything/output/origin.ply", xyz, np.zeros(xyz.shape, dtype=np.uint8))
-            # xyz = gt_points_source[0].cpu().numpy() 
-            # storePly("/mnt/ziyuxiao/code/GaussianAnything/output/gt.ply", xyz, np.zeros(xyz.shape, dtype=np.uint8))
-            # xyz = gt_points_source_nomask[0].cpu().numpy() 
-            # storePly("/mnt/ziyuxiao/code/GaussianAnything/output/gt_nomask.ply", xyz, np.zeros(xyz.shape, dtype=np.uint8))
-
             features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts3d_moge[b], pts_enc_feat[b], pts_rgb[b], voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
             voxels_features = self.vfe(features, num_points, coors)
             
             # TODO: We need a corase voxel predictor
-            batch_binary_logits, _ = self.vox_pred(voxels_features, coors)
+            batch_binary_logits, _, batch_pred_feat = self.vox_pred(voxels_features, coors)  # batch_pred_feat (B, Z, Y, X, 64)
             # get gt corase voxel here
             if self.training:
-                batch_binary_voxel = self.get_binary_voxels(gt_points[b]).float()
+                batch_binary_voxel, _ = self.get_binary_voxels(gt_points[b])
             else:
                 batch_binary_voxel = torch.zeros_like(batch_binary_logits)
+            batch_binary_voxel = batch_binary_voxel.float()
 
-            # padded_coors, padded_voxel_centers = self.padding_voxel_maxpooling(coors, (batch_binary_logits.sigmoid() > 0.5).float())
-            # padding_number += padded_coors.shape[0]
-            # padding_tokens = self.mask_token.repeat(padded_coors.shape[0], 1)
-            # voxels_features = torch.cat([voxels_features, padding_tokens], dim=0)
-            # voxel_centers = torch.cat([voxel_centers, padded_voxel_centers], dim=0)
+            ## 用batch_binary_logits mask 补全 ##
+            ## padding_all_coors could not be directly used since voxel size doesn't match
+            ## 这里还可加一步 coarse-to-fine??
+            coarse_src_coors, _ = compute_voxel_coors_and_centers(pts3d_moge[b], voxel_size=self.coarse_voxel_size, point_cloud_range=self.pc_range)
+            padding_all_coors, padding_all_voxel_centers, padding_all_feats = self.padding_voxel_maxpooling_coarse(coarse_src_coors, (batch_binary_logits.sigmoid() > 0.5).float(), batch_pred_feat)
+            padding_number += (padding_all_coors.shape[0] - coors.shape[0])
 
+            ### 用 <src fine> combine <predicted coarse> 为了render时候增加voxel数量？
+            voxel_centers = torch.cat([voxel_centers, padding_all_voxel_centers])
+            voxels_features = torch.cat([voxels_features, padding_all_feats])
+
+            # PADDING 1: 用src fine + coarse prediction 先出一份gaussian
+            output_batch_pretrain = self.decoder_gs_padding([voxels_features])
+            offset = output_batch_pretrain["gauss_offset"]
+            offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
+            batch_voxel_centers = voxel_centers.unsqueeze(0) + offset
+            pts3d_reshape = rearrange(batch_voxel_centers, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
+            output_batch_pretrain["gauss_means"] = pts3d_reshape
+
+            ## PADDING 2: combined <src view fine xyz/feature> and <coarse xyz/feature> go through point transformer##
             voxel_centers = voxel_centers.unsqueeze(0)
             voxels_features = voxels_features.unsqueeze(0)
             # normalize points in each batch
@@ -321,13 +342,14 @@ class GATModel(BaseModel):
             pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
             
             output_batch = self.decoder_gs(pts_feat)
-            
             offset = output_batch["gauss_offset"]
             offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
             pts3d = pts3d + offset
-            
             pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
             output_batch["gauss_means"] = pts3d_reshape
+
+            for key, value in output_batch.items():
+                output_batch[key] = torch.cat([value, output_batch_pretrain[key]], dim=-1)
             
             all_batch_outputs.append(output_batch)
             binary_voxel.append(batch_binary_voxel)
@@ -335,19 +357,15 @@ class GATModel(BaseModel):
             
         # save binary_voxel and binary_logits
         binary_logits, binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0)
-        
+
         all_batch_outputs = self.padding_dummy_gaussians(all_batch_outputs)
-        
         for key, value in all_batch_outputs.items():
             outputs[key] = value
             
-        
         outputs["binary_logits"], outputs["binary_voxel"] = binary_logits, binary_voxel
         outputs["padding_number"] = padding_number / binary_logits.shape[0]
 
-
         if cfg.model.gaussian_rendering:
-            # self.process_gt_poses(inputs, outputs)
             self.render_images(inputs, outputs)
 
         return outputs

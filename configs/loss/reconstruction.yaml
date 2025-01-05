@@ -10,7 +10,7 @@ lpips:
   apply_after_step: 1
 
 bce:
-  weight: 0.2
+  weight: 100
 
 feature:
   weight: -1 # 20

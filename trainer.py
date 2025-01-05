@@ -193,8 +193,7 @@ class Trainer(nn.Module):
             losses["loss/feature_loss"] = feature_loss
             total_loss += self.cfg.loss.feature.weight * feature_loss
 
-        pretrain_feature = False
-        if self.cfg.model.gaussian_rendering and pretrain_feature:
+        if self.cfg.model.gaussian_rendering and cfg.train.pretrain_feature:
             # regularize too big gaussians
             if (big_g_lmbd := cfg.loss.gauss_max_scale.weight) > 0:
                 scaling = outputs["gauss_scaling"]
