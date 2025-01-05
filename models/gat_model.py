@@ -242,11 +242,15 @@ class GATModel(BaseModel):
 
             ### 加gt binary mask ###  
             ### Difference: train 的时候用 batch_binary_logits ###
-            batch_pred_feat = batch_pred_feat[batch_binary_voxel == 1.0]
+            # batch_pred_feat = batch_pred_feat[batch_binary_voxel == 1.0]
+            coarse_src_coors, _ = compute_voxel_coors_and_centers(gt_points_dict[b][0], voxel_size=self.coarse_voxel_size, point_cloud_range=self.pc_range)
+            padding_all_coors, padding_all_voxel_centers, padding_all_feats = self.padding_voxel_maxpooling_coarse(coarse_src_coors, (batch_binary_logits.sigmoid() > 0.5).float(), batch_pred_feat)
 
             ### 用 <src fine> combine <predicted coarse> 为了render时候增加voxel数量？
-            voxel_centers = torch.cat([voxel_centers, batch_gt_voxel_centers])
-            voxels_features = torch.cat([voxels_features, batch_pred_feat])
+            # voxel_centers = torch.cat([voxel_centers, batch_gt_voxel_centers])
+            # voxels_features = torch.cat([voxels_features, batch_pred_feat])
+            voxel_centers = torch.cat([voxel_centers, padding_all_voxel_centers])
+            voxels_features = torch.cat([voxels_features, padding_all_feats])
 
             output_batch = self.decoder_gs_padding([voxels_features])
             offset = output_batch["gauss_offset"]
