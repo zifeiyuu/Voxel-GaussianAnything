@@ -68,6 +68,8 @@ class LinearHead(nn.Module):
 
         for i, feat in enumerate(feats):
             # breakpoint()
+            if feat.dim() == 2:
+                feat = feat.unsqueeze(0)
             gaussian_params = self.gaussian_heads[i](feat) 
             gaussian_params = rearrange(gaussian_params, 'b n d -> b d n')
             integrated_gaussian_params.append(gaussian_params)

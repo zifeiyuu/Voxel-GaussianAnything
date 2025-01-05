@@ -10,9 +10,7 @@ lpips:
   apply_after_step: 1
 
 bce:
-  weight: 100
+  weight: 0.2
 
 feature:
-  mode: # "mean"
-  weight: 20
-  weight_mean: 1e6
+  weight: -1 # 20

@@ -92,11 +92,10 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                         trainer.model.module.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
                     else:
                         trainer.model.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
-            if not cfg.train.pretrain:
-                if step != 0 and (early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
-                    with torch.no_grad():
-                        model_eval = ema if ema is not None else trainer.model
-                        trainer.validate(model_eval, evaluator, val_loader, device='cuda')
+            if step != 0 and (early_phase or step % cfg.run.val_frequency == 0 and evaluator is not None):
+                with torch.no_grad():
+                    model_eval = ema if ema is not None else trainer.model
+                    trainer.validate(model_eval, evaluator, val_loader, device='cuda')
 
         # Clean up and free GPU memory
         if early_phase or step % cfg.run.val_frequency == 0 or step % 100 == 0:

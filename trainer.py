@@ -71,7 +71,7 @@ class Trainer(nn.Module):
         else:
             mask = None
         if self.pretrain:
-            losses = self.compute_pretraining_loss(outputs)
+            losses = self.compute_pretraining_loss(inputs, outputs)
         else:
             losses = self.compute_losses(inputs, outputs, mask)
         self.get_grad_norm(outputs)
@@ -177,7 +177,8 @@ class Trainer(nn.Module):
         feature_loss /= len(pred_feat)
         return feature_loss
     
-    def compute_pretraining_loss(self, outputs):
+    def compute_pretraining_loss(self, inputs, outputs):
+        cfg = self.cfg
         losses = {}
         total_loss = 0.0
 
@@ -188,19 +189,63 @@ class Trainer(nn.Module):
             total_loss += self.cfg.loss.bce.weight * bce_loss
 
         if self.cfg.loss.feature.weight > 0 and not self.warmup:
-            if self.cfg.loss.feature.mode != "mean":
-                feature_loss = self.compute_feature_loss(outputs)
-                losses["loss/feature_loss"] = feature_loss
-                total_loss += self.cfg.loss.feature.weight * feature_loss
+            feature_loss = self.compute_feature_loss(outputs)
+            losses["loss/feature_loss"] = feature_loss
+            total_loss += self.cfg.loss.feature.weight * feature_loss
+
+        pretrain_feature = False
+        if self.cfg.model.gaussian_rendering and pretrain_feature:
+            # regularize too big gaussians
+            if (big_g_lmbd := cfg.loss.gauss_max_scale.weight) > 0:
+                scaling = outputs["gauss_scaling"]
+                big_gaussians = torch.where(scaling > cfg.loss.gauss_max_scale.thresh)
+                if len(big_gaussians[0]) > 0:
+                    big_gauss_reg_loss = torch.mean(scaling[big_gaussians])
+                else:
+                    big_gauss_reg_loss = 0
+                losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss
+                total_loss += big_g_lmbd * big_gauss_reg_loss
+
+            # regularize too small gaussians
+            if (small_g_lmbd := cfg.loss.gauss_min_scale.weight) > 0:
+                scaling = outputs["gauss_scaling"]
+
+                small_gaussians = torch.where(scaling < cfg.loss.gauss_min_scale.single_thresh)
+                if len(small_gaussians[0]) > 0:
+                    small_gauss_reg_loss = torch.mean(scaling[small_gaussians])
+                else:
+                    small_gauss_reg_loss = 0
+                losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss
+                total_loss += small_g_lmbd * small_gauss_reg_loss
+
+            # regularize too big offset
+            if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:
+                offset = outputs["gauss_offset"]
+                big_offset = torch.where(offset**2 > cfg.loss.gauss_offset.thresh**2)
+                if len(big_offset[0]) > 0:
+                    big_offset_reg_loss = torch.mean(offset[big_offset]**2)
+                else:
+                    big_offset_reg_loss = 0.0
+                losses["loss/gauss_offset_reg"] = big_offset_reg_loss
+                total_loss += offs_lmbd * big_offset_reg_loss
+
+            # reconstruction loss
+            if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                frame_ids = self.model.module.all_frame_ids(inputs)
             else:
-                feature_loss = 0
-                mean_feat, gt_mean_feat = outputs["feat_mean"], outputs["gt_feat_mean"]
-                for b in range(len(mean_feat)):
-                    feature_loss += F.mse_loss(mean_feat[b], gt_mean_feat[b], reduction="mean")
-                feature_loss /= len(mean_feat) 
-                losses["loss/feature_loss"] = feature_loss
-                total_loss += self.cfg.loss.feature.weight_mean * feature_loss
-            
+                frame_ids = self.model.all_frame_ids(inputs)
+            rec_loss = 0
+            for frame_id in frame_ids:
+                # compute gaussian reconstruction loss
+                target = inputs[("color_aug", frame_id, 0)]
+                target = target[:,:,cfg.dataset.pad_border_aug:target.shape[2]-cfg.dataset.pad_border_aug,
+                                cfg.dataset.pad_border_aug:target.shape[3]-cfg.dataset.pad_border_aug,]
+                pred = outputs[("color_gauss", frame_id, 0)]
+                rec_loss += self.compute_reconstruction_loss(pred, target, losses)
+            rec_loss /= len(frame_ids)
+            losses["loss/rec"] = rec_loss
+            total_loss += rec_loss
+
         losses["loss/total"] = total_loss
 
         return losses
