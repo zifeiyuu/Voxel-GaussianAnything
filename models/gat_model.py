@@ -69,11 +69,11 @@ class GATModel(BaseModel):
         if self.pre_train_flag:
             head_in_dim = [64]
 
-        self.decoder_gs_padding = LinearHead(cfg, [cfg.model.voxel_feat_dim], xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
+        self.decoder_gs_padding = LinearHead(cfg, [cfg.model.voxel_feat_dim], xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias, predict_offset=False)
         self.parameters_to_train += self.decoder_gs_padding.get_parameter_groups()
 
         if not self.pre_train_flag:
-            self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias)
+            self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias, predict_offset=cfg.model.predict_offset)
             self.parameters_to_train += self.decoder_gs.get_parameter_groups()
 
         self.use_checkpoint = False
@@ -253,10 +253,7 @@ class GATModel(BaseModel):
             voxels_features = torch.cat([voxels_features, padding_all_feats])
 
             output_batch = self.decoder_gs_padding([voxels_features])
-            offset = output_batch["gauss_offset"]
-            offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
-            voxel_centers = voxel_centers.unsqueeze(0) + offset
-            pts3d_reshape = rearrange(voxel_centers, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
+            pts3d_reshape = rearrange(voxel_centers.unsqueeze(0), "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
             output_batch["gauss_means"] = pts3d_reshape
 
             all_batch_outputs.append(output_batch)
@@ -326,9 +323,7 @@ class GATModel(BaseModel):
 
             # PADDING 1: 用src fine + coarse prediction 先出一份gaussian
             output_batch_pretrain = self.decoder_gs_padding([voxels_features])
-            offset = output_batch_pretrain["gauss_offset"]
-            offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
-            batch_voxel_centers = voxel_centers.unsqueeze(0) + offset
+            batch_voxel_centers = voxel_centers.unsqueeze(0)
             pts3d_reshape = rearrange(batch_voxel_centers, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
             output_batch_pretrain["gauss_means"] = pts3d_reshape
 
@@ -346,9 +341,10 @@ class GATModel(BaseModel):
             pts3d = pts3d * (z_median + 1e-6) + mean # (B, N, 3)
             
             output_batch = self.decoder_gs(pts_feat)
-            offset = output_batch["gauss_offset"]
-            offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
-            pts3d = pts3d + offset
+            if cfg.model.predict_offset:
+                offset = output_batch["gauss_offset"]
+                offset = rearrange(offset, "b s c n -> b (s n) c", s=self.cfg.model.gaussians_per_pixel)
+                pts3d = pts3d + offset
             pts3d_reshape = rearrange(pts3d, "b (s n) c -> b s c n", s=cfg.model.gaussians_per_pixel)
             output_batch["gauss_means"] = pts3d_reshape
 

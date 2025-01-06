@@ -10,11 +10,11 @@ from IPython import embed
 import random
 
 class LinearHead(nn.Module):
-    def __init__(self, cfg, in_dims=[32], xyz_scale=0.01, xyz_bias=0.0, scale_mul=1):
+    def __init__(self, cfg, in_dims=[32], xyz_scale=0.01, xyz_bias=0.0, scale_mul=1, predict_offset=True):
         super().__init__()
 
         self.cfg = cfg
-
+        self.predict_offset = predict_offset
         self.split_dimensions, scales, biases = get_splits_and_inits(cfg)
         self.num_output_channels = sum(self.split_dimensions)
 
@@ -42,7 +42,7 @@ class LinearHead(nn.Module):
                     gaussian_head.bias[start_channel:start_channel + out_channel], bias)
                 start_channel += out_channel
 
-        if self.cfg.model.predict_offset:
+        if predict_offset:
             # Linear offset decoders for each in_dim
             self.offset_heads = nn.ModuleList([
                 nn.Linear(in_dim, 3) for in_dim in in_dims
@@ -75,7 +75,7 @@ class LinearHead(nn.Module):
             integrated_gaussian_params.append(gaussian_params)
 
             # Extra MLP for offset prediction
-            if self.cfg.model.predict_offset:
+            if self.predict_offset:
                 pts_offsets = self.offset_heads[i](feat) 
                 pts_offsets = rearrange(
                     pts_offsets, 'b (s n) d -> b s d n', s=self.cfg.model.gaussians_per_pixel
@@ -85,7 +85,7 @@ class LinearHead(nn.Module):
         integrated_gaussian_params = torch.cat(integrated_gaussian_params, dim=-1)
         out = self.gaussian_decoder(integrated_gaussian_params, self.split_dimensions)
 
-        if self.cfg.model.predict_offset:
+        if self.predict_offset:
             integrated_gauss_offset = torch.cat(integrated_gauss_offset, dim=-1)
             out["gauss_offset"] = integrated_gauss_offset
 

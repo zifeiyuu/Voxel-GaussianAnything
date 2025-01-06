@@ -6,7 +6,7 @@ defaults:
 name: gat_voxsplat
 frame_ids: [0, -1, 1]
 scales: [0]
-gauss_novel_frames: [-1, 1, 2, -2, 3, -3]  #
+gauss_novel_frames: [-1, 1, 2, -2, 3, -3, 4, -4]  #
 
 # NOT USED
 selective_padding: false

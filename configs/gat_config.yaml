@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "scannetpp_v2_bce+rgb" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
+  exp_name: "pretrain_bce+rgb_nooffset" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
   file: "gat_config.yaml"
 
 data_loader:
@@ -34,7 +34,7 @@ optimiser:
   num_epochs: 5
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 2
+  accumulation_steps: 1
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0
@@ -49,7 +49,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 1000
+  log_frequency: 100000
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5
