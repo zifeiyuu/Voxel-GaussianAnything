@@ -78,7 +78,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
             if step % cfg.run.save_frequency == 0 and step != 0:
                 if cfg.train.pretrain:
                     base_dir = Path(__file__).resolve().parent
-                    out_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain" / "pretrain_ckpt"
+                    out_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain" / "ckpt"
 
                     if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
                         trainer.model.module.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
@@ -86,7 +86,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                         trainer.model.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
                 else:
                     base_dir = Path(__file__).resolve().parent
-                    out_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "gsm" / "pretrain_ckpt"
+                    out_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "gsm" / "ckpt"
                     
                     if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
                         trainer.model.module.save_model(optimiser, step, ema, save_folder = out_dir, pretraining=True)
@@ -194,23 +194,23 @@ def main(cfg: DictConfig):
     # Load model from checkpoint
     if pretrain:
         if (ckpt_dir := model.checkpoint_dir()).exists():
-            model.load_model(ckpt_dir, optimiser=optimiser, pretraining=True)
+            model.load_model(ckpt_dir, optimiser=optimiser)
             print(f"Resume training using checkpoint from {ckpt_dir}")
         elif cfg.train.load_weights_folder:
-            model.load_model(cfg.ckpt_path, pretraining=True)
+            model.load_model(cfg.ckpt_path)
             print(f"Train using existing checkpoint from {cfg.ckpt_path}")
     else:
         if cfg.train.load_pretrain:
             base_dir = Path(__file__).resolve().parent
-            load_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain" / "pretrain_ckpt"
-            model.load_model(load_dir, optimiser=optimiser, pretraining=True, load_optimizer=False, ckpt_ids=1)
+            load_dir = base_dir / cfg.output_path / cfg.config['exp_name'] / "pretrain" / "ckpt"
+            model.load_model(load_dir, optimiser=optimiser, load_optimizer=False, ckpt_ids=0)
             print(f"Train using existing checkpoint from {load_dir}")
         else:
             if (ckpt_dir := model.checkpoint_dir()).exists():
-                model.load_model(ckpt_dir, optimiser=optimiser, pretraining=False)
+                model.load_model(ckpt_dir, optimiser=optimiser)
                 print(f"Resume training using checkpoint from {ckpt_dir}")
             elif cfg.train.load_weights_folder:
-                model.load_model(cfg.ckpt_path, pretraining=False)
+                model.load_model(cfg.ckpt_path, optimiser=optimiser)
                 print(f"Train using existing checkpoint from {cfg.ckpt_path}")
     trainer.model = ddp_model
 

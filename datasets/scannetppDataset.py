@@ -144,8 +144,6 @@ class scannetppDataset(Dataset):
             #generate indices based on the strategy
             if self.cfg.video_mode:
                 self._seq_key_src_idx_pairs = self._generate_video_indices()
-            elif not self.cfg.dataset.random_selection:
-                self._seq_key_src_idx_pairs = self._generate_defined_indices()
             else:
                 self._seq_key_src_idx_pairs = self._generate_random_indices()
 
@@ -166,6 +164,8 @@ class scannetppDataset(Dataset):
             for period_index, period in enumerate(self._pose_data[key]):
                 seq_len = len(period["poses"])
                 frame_ids = [i + left_offset for i in range(seq_len - extra_frames)]
+                if self.cfg.train.pretrain:
+                    frame_ids = frame_ids[0 :: (self.frame_count - 1) // 2]
                 seq_key_id_pairs = [(key, period_index, f_id) for f_id in frame_ids]
                 key_id_pairs += seq_key_id_pairs
         return key_id_pairs
@@ -173,50 +173,17 @@ class scannetppDataset(Dataset):
     def _generate_random_indices(self):
         """Generate random frame indices for testing."""
         key_id_pairs = []
+        neighbor_frame_num = len(self.novel_frames)
         for key in self._seq_keys:
             for period_index, period in enumerate(self._pose_data[key]):
                 seq_len = len(period["poses"])
-                if seq_len < 4:
+                if seq_len < 2 * neighbor_frame_num + 1:
                     continue  # Skip if there are not enough frames
                 # Randomly select four frame indices
-                frame_indices = random.sample(range(seq_len), 4)
-                frame_indices.sort()  # Sort indices to maintain a consistent order
-                key_id_pairs.append((key, period_index, frame_indices))
-        return key_id_pairs
-
-    def _generate_defined_indices(self, gap1=-1, gap2=0, gap3=1):
-        """Generate default frame indices for varied gaps, including zero or negative."""
-        key_id_pairs = []
-        
-        for key in self._seq_keys:
-            for period_index, period in enumerate(self._pose_data[key]):
-                seq_len = len(period["poses"])
-
-                # Calculate the minimum and maximum index for the source frame to allow all gaps
-                min_gap = min(gap1, gap2, gap3)
-                max_gap = max(gap1, gap2, gap3)
-
-                if seq_len <= max(abs(min_gap), abs(max_gap)):
-                    print("No enough frames to accommodate the largest gap magnitude.")
-                    continue
-
-                min_index = max(0, -min_gap)  # Ensure the smallest negative gap doesn't go below 0
-                max_index = seq_len - 1 - max_gap  # Ensure the largest positive gap doesn't exceed seq_len-1
-                
-                if min_index > max_index:
-                    print("Adjusted index range invalid, skipping.")
-                    continue
-
-                # src_idx = random.randint(min_index, max_index)
-                src_idx = (min_index + max_index) // 2
-                
-                # Calculate indices for target frames
-                tgt_1_idx = src_idx + gap1
-                tgt_2_idx = src_idx + gap2
-                tgt_3_idx = src_idx + gap3
-
-                key_id_pairs.append((key, period_index, [src_idx, tgt_1_idx, tgt_2_idx, tgt_3_idx]))
-            
+                # frame_indices = random.sample(range(neighbor_frame_num, seq_len - neighbor_frame_num), 1)
+                # frame_indices.sort()  # Sort indices to maintain a consistent order
+                frame_indices = [seq_len // 2]
+                key_id_pairs += [(key, period_index, f_id) for f_id in frame_indices]
         return key_id_pairs
 
     def _generate_video_indices(self):
@@ -337,11 +304,18 @@ class scannetppDataset(Dataset):
                 src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]                
             frame_names = [0] + self.novel_frames  
         else:
-            seq_key, period_idx, src_and_tgt_frame_idxs = self._seq_key_src_idx_pairs[index]
+            seq_key, period_idx, src_idx = self._seq_key_src_idx_pairs[index]
+            seq_len = len(self._pose_data[seq_key][period_idx]["poses"])
             pose_data = self._pose_data[seq_key][period_idx]
-            total_frame_num = len(src_and_tgt_frame_idxs)
-            frame_names = list(range(total_frame_num))
-
+          
+            target_frame_idxs = torch.arange(-2 * self.max_dilation, 2 * self.max_dilation + 1)
+            target_frame_idxs = target_frame_idxs[target_frame_idxs != 0]
+            sorted_frame_idxs = sorted(target_frame_idxs.tolist(), key=lambda x: abs(x))
+            sorted_frame_idxs = sorted_frame_idxs[:self.frame_count - 1]
+            src_and_tgt_frame_idxs = [src_idx] + [
+                max(min(i + src_idx, seq_len - 1), 0) for i in sorted_frame_idxs
+            ]
+            frame_names = [0] + self.novel_frames  
         # have_depth = seq_key not in self._missing_scans
         have_depth = True
         inputs = {}
@@ -381,7 +355,7 @@ class scannetppDataset(Dataset):
                 inputs[("depth_sparse", frame_name)] = depth
 
         if not self.is_train:
-            inputs[("total_frame_num", 0)] = total_frame_num
+            inputs[("total_frame_num", 0)] = len(frame_names)
 
         return inputs
 

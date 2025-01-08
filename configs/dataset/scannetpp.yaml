@@ -35,7 +35,7 @@ test_split: mine
 
 #new
 specific_files: 
-random_selection: false
+random_selection: true
 
 #probably used to exclude the outer edges of the image？
 #In original evaluation.py file but not in original config, bug?

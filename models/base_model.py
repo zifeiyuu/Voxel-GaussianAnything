@@ -243,15 +243,7 @@ class BaseModel(nn.Module):
         logging.info(f"saving checkpoint to {str(save_path)}")
 
         model = ema.ema_model if ema is not None else self
-
-        if pretraining:
-            # Save only the pretraining parts
-            model_state = {
-                k: v for k, v in model.state_dict().items()
-                if "vfe" in k or "vox_pred" in k or "decoder_gs_padding" in k
-            }
-        else:
-            model_state = model.state_dict()
+        model_state = model.state_dict()
 
         save_dict = {
             "model": model_state,
@@ -268,7 +260,7 @@ class BaseModel(nn.Module):
             for ckpt in ckpts[num_ckpts:]:
                 ckpt.unlink()
 
-    def load_model(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0, pretraining=False, load_optimizer=True):
+    def load_model(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0, load_optimizer=True):
         """load model(s) from disk"""
         weights_path = Path(weights_path)
 

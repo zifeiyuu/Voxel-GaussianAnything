@@ -1,4 +1,3 @@
 #!/bin/sh
 
-python evaluate.py \
-    model.depth.version=v1 
+python evaluate.py --config-name=gat_config

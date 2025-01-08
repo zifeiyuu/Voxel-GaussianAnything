@@ -148,10 +148,7 @@ class GATModel(BaseModel):
         # we project points from target view and novel view
         pts3d_batch = []
         pts3d_dict_batch = []
-        if self.training:
-            using_frames = self.using_frames
-        else:
-            using_frames = [0, 1, 2, 3]
+        using_frames = self.using_frames
         for batch_idx in range(len(inputs[('depth_sparse', 0)])):    # outputs[('depth_pred', 0)]    inputs[('depth_sparse', 0)]
             pts3d = []
             pts3d_dict = {}
@@ -349,7 +346,10 @@ class GATModel(BaseModel):
             output_batch["gauss_means"] = pts3d_reshape
 
             for key, value in output_batch.items():
-                output_batch[key] = torch.cat([value, output_batch_pretrain[key]], dim=-1)
+                if key == "gauss_offset":
+                    output_batch[key] = torch.cat([value, torch.zeros_like(output_batch_pretrain["gauss_means"])], dim=-1)
+                else:
+                    output_batch[key] = torch.cat([value, output_batch_pretrain[key]], dim=-1)
             
             all_batch_outputs.append(output_batch)
             binary_voxel.append(batch_binary_voxel)

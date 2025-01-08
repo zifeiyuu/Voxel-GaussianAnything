@@ -123,8 +123,9 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     match cfg.dataset.name:
         case "pixelsplat" | "scannetpp" | "arkitscenes":
             # Override the frame indices used for evaluation
-            target_frame_ids = [1, 2, 3]
-            eval_frames = ["src", "tgt5", "tgt10", "tgt_rand"]
+            all_target_frame_ids = list(cfg.model.gauss_novel_frames)
+            target_frame_ids = all_target_frame_ids[: 3]
+            eval_frames = ["src", "tgt1", "tgt2", "tgt3"]
             for fid, target_name in zip(add_source_frame_id(target_frame_ids), eval_frames):
                 score_dict[fid] = {"ssim": [], "psnr": [], "lpips": [], "name": target_name}
 
@@ -133,6 +134,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     out_dir = output_path / cfg.config['exp_name'] / "gsm" / f"{now:%Y-%m-%d}_{now:%H-%M-%S}"
     out_dir.mkdir(parents=True, exist_ok=True)
     spliced_images_list = []
+    iou_list = []
     for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)], desc="Evaluating"):
         try:
             inputs = next(dataloader_iter)
@@ -160,9 +162,9 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
         with torch.no_grad():
             if device is not None:
                 to_device(inputs, device)
-            inputs["target_frame_ids"] = target_frame_ids
+            inputs["target_frame_ids"] = all_target_frame_ids
             outputs = model(inputs)
-            
+    
         for f_id in score_dict.keys():
             pred = outputs[('color_gauss', f_id, 0)]
             gt = inputs[('color', f_id, 0)]  # Output is directly from input
@@ -195,6 +197,13 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
             plt.imsave(total_image_path, total_image)
             spliced_images_list = []
 
+        # calculate iou 
+        binary_logits, binary_voxels = outputs['binary_logits'], outputs['binary_voxel']
+        rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
+            (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
+        ).sum()
+        iou_list.append(rec_iou)
+
     metric_names = ["psnr", "ssim", "lpips"]
     score_dict_by_name = {}
     for f_id in score_dict.keys():
@@ -212,14 +221,16 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
         metric_line = f"{metric}: {np.mean(np.array(vals))}"
         print(metric_line)
         result_content.append(metric_line)
-
     json_content = json.dumps(score_dict_by_name, indent=4)
 
+    mean_iou = sum(iou_list) / len(iou_list)
+    print(f"< Mean iou: {mean_iou}>")
     # Write the combined content to the result.txt file
     result_txt_path = out_dir / "result.txt"
     with open(result_txt_path, "w") as txt_file:
         txt_file.write("\n".join(result_content) + "\n\n")
         txt_file.write(json_content)
+        txt_file.write("\n" + str(mean_iou) + "\n")
 
     return score_dict_by_name
 
@@ -247,16 +258,17 @@ def main(cfg: DictConfig):
 
     base_dir = Path(__file__).resolve().parent
 
-    ckpt_path = base_dir / cfg.ckpt_path
+    ckpt_path = Path(cfg.ckpt_path)
     if ckpt_path.exists():
-        model.load_model(ckpt_path, ckpt_ids=0)
+        model.load_model(ckpt_path, ckpt_ids=0, load_optimizer=False)
 
     split = "test"
     save_vis = cfg.save_vis
     video_mode = cfg.video_mode
     original_video = cfg.original_video
     scene_ids = cfg.scene_ids
-    output_path = base_dir / cfg.output_path    
+    output_path = base_dir / cfg.output_path / 'EVAL'
+    output_path.mkdir(exist_ok=True)
     dataset, dataloader = create_datasets(cfg, split = split)
 
     if video_mode:
@@ -268,7 +280,7 @@ def main(cfg: DictConfig):
         score_dict_by_name = evaluate(model, cfg, evaluator, dataloader, 
                                     device=device, save_vis=save_vis, output_path = output_path)
         print(json.dumps(score_dict_by_name, indent=4))
-        if cfg.dataset.name=="re10k" or cfg.dataset.name=="pixelsplat":
+        if cfg.dataset.name=="re10k" or cfg.dataset.name=="pixelsplat" or cfg.dataset.name=="scannetpp":
             with open("metrics_{}_{}_{}.json".format(cfg.dataset.name, split, cfg.dataset.test_split), "w") as f:
                 json.dump(score_dict_by_name, f, indent=4)
         with open("metrics_{}_{}.json".format(cfg.dataset.name, split), "w") as f:
