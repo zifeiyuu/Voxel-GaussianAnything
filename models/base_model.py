@@ -48,9 +48,6 @@ class BaseModel(nn.Module):
     
     def all_frame_ids(self, inputs):
         return add_source_frame_id(self.target_frame_ids(inputs))
-    
-    def close_frame_ids(self, inputs):
-        return inputs["close_frame_ids"]
 
     def set_train(self):
         """Convert all models to training mode

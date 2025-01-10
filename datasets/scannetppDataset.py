@@ -324,11 +324,6 @@ class scannetppDataset(Dataset):
         have_depth = True
         inputs = {}
 
-        # #find some frame names close to src frame
-        # frame_name_to_index = list(zip(frame_names, src_and_tgt_frame_idxs))
-        # sorted_by_distance = sorted(frame_name_to_index, key=lambda x: abs(x[1] - src_idx))
-        # inputs['close_frame_ids'] = [name for name, _ in sorted_by_distance][:4]
-
         # Iterate over the frames and process each frame
         for frame_name, frame_idx in zip(frame_names, src_and_tgt_frame_idxs):
             # Process the intrinsic and pose for the current frame
