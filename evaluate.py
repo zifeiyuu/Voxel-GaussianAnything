@@ -136,16 +136,14 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     spliced_images_list = []
     iou_list = []
     for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)], desc="Evaluating"):
-        try:
-            inputs = next(dataloader_iter)
-        ## not used ##
-        except Exception as e:
-            if cfg.dataset.name == "re10k" or cfg.dataset.name == "pixelsplat":
-                if cfg.dataset.test_split in ["pixelsplat_ctx1", "pixelsplat_ctx2", "latentsplat_ctx1", "latentsplat_ctx2"]:
-                    print(f"Failed to read example {k}")
-                    continue
-            raise e
-        
+        inputs = next(dataloader_iter)
+
+        with torch.no_grad():
+            if device is not None:
+                to_device(inputs, device)
+            inputs["target_frame_ids"] = all_target_frame_ids
+            outputs = model(inputs)        
+
         if save_vis:
             seq_name = inputs[("frame_id", 0)][0]
             out_out_dir = out_dir / seq_name
@@ -159,12 +157,6 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
             out_spliced_dir = out_out_dir / "spliced"
             out_spliced_dir.mkdir(exist_ok=True)
 
-        with torch.no_grad():
-            if device is not None:
-                to_device(inputs, device)
-            inputs["target_frame_ids"] = all_target_frame_ids
-            outputs = model(inputs)
-    
         for f_id in score_dict.keys():
             pred = outputs[('color_gauss', f_id, 0)]
             gt = inputs[('color', f_id, 0)]  # Output is directly from input
@@ -191,7 +183,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
             for metric_name, v in out.items():
                 score_dict[f_id][metric_name].append(v)
 
-        if spliced_images_list:
+        if spliced_images_list and save_vis:
             total_image = np.vstack(spliced_images_list)  
             total_image_path = str(out_spliced_dir / f"inAll.png") 
             plt.imsave(total_image_path, total_image)
@@ -202,6 +194,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
         rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
             (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
         ).sum()
+        print(f"iou: {rec_iou}")
         iou_list.append(rec_iou)
 
     metric_names = ["psnr", "ssim", "lpips"]
@@ -246,8 +239,6 @@ def main(cfg: DictConfig):
     os.chdir(output_dir)
     print("Working dir:", output_dir)
 
-    cfg.data_loader.batch_size = 1
-    cfg.data_loader.num_workers = 16
     if cfg.model.name:
         from models.gat_model import GATModel
         model = GATModel(cfg)

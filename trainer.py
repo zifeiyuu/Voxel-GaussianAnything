@@ -219,9 +219,9 @@ class Trainer(nn.Module):
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
-                frame_ids = self.model.module.all_frame_ids(inputs)
+                frame_ids = self.model.module.all_frame_ids(inputs)[:4]
             else:
-                frame_ids = self.model.all_frame_ids(inputs)
+                frame_ids = self.model.all_frame_ids(inputs)[:4]
             rec_loss = 0
             for frame_id in frame_ids:
                 # compute gaussian reconstruction loss
@@ -302,9 +302,10 @@ class Trainer(nn.Module):
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
-                frame_ids = self.model.module.all_frame_ids(inputs)
+                frame_ids = self.model.module.all_frame_ids(inputs)[:4]
+
             else:
-                frame_ids = self.model.all_frame_ids(inputs)
+                frame_ids = self.model.all_frame_ids(inputs)[:4]
             rec_loss = 0
             for frame_id in frame_ids:
                 # compute gaussian reconstruction loss
@@ -361,10 +362,12 @@ class Trainer(nn.Module):
 
         for l, v in losses.items():
             logger.add_scalar(f"{mode}/{l}", v, self.step)
+
+        if cfg.model.gaussian_rendering:
+            logger.add_scalar(f"{mode}/gauss/scale/mean", torch.mean(outputs["gauss_scaling"]).item(), self.step)
+
         if not cfg.train.pretrain:
             if cfg.model.gaussian_rendering:
-                logger.add_scalar(f"{mode}/gauss/scale/mean", torch.mean(outputs["gauss_scaling"]).item(), self.step)
-
                 if self.cfg.model.predict_offset:
                     offset_mag = torch.linalg.vector_norm(outputs["gauss_offset"], dim=1)
                     mean_offset = offset_mag.mean()
@@ -380,9 +383,9 @@ class Trainer(nn.Module):
         """
         cfg = self.cfg
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
-            frame_ids = self.model.module.all_frame_ids(inputs)
+            frame_ids = self.model.module.all_frame_ids(inputs)[:4]
         else:
-            frame_ids = self.model.all_frame_ids(inputs)
+            frame_ids = self.model.all_frame_ids(inputs)[:4]
         scales = cfg.model.scales
         logger = self.logger
         if logger is None:

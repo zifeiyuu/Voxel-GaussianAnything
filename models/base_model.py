@@ -48,6 +48,9 @@ class BaseModel(nn.Module):
     
     def all_frame_ids(self, inputs):
         return add_source_frame_id(self.target_frame_ids(inputs))
+    
+    def close_frame_ids(self, inputs):
+        return inputs["close_frame_ids"]
 
     def set_train(self):
         """Convert all models to training mode
@@ -138,7 +141,7 @@ class BaseModel(nn.Module):
             device = pos_input_frame.device
             dtype = pos_input_frame.dtype
 
-            frame_ids = self.all_frame_ids(inputs)
+            frame_ids = self.all_frame_ids(inputs)[:4]
 
             for frame_id in frame_ids:
                 if frame_id == 0:

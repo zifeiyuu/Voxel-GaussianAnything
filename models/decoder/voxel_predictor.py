@@ -195,6 +195,7 @@ class DiT(nn.Module):
         num_heads=16,
         mlp_ratio=4.0,
         learn_sigma=True,
+        out_dim=64
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -202,6 +203,8 @@ class DiT(nn.Module):
         self.out_channels = in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
+
+        self.out_dim = out_dim
 
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
 
@@ -213,7 +216,7 @@ class DiT(nn.Module):
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
-        self.final_layer_feat = FinalLayer(hidden_size, patch_size, self.out_channels*64)
+        self.final_layer_feat = FinalLayer(hidden_size, patch_size, self.out_channels*self.out_dim)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -264,9 +267,9 @@ class DiT(nn.Module):
         h = w = int(x.shape[1] ** 0.5)
         assert h * w == x.shape[1]
 
-        x = x.reshape(shape=(x.shape[0], h, w, p, p, c, 64))
+        x = x.reshape(shape=(x.shape[0], h, w, p, p, c, self.out_dim))
         x = torch.einsum('nhwpqck->nchpwqk', x)
-        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p, 64))
+        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p, self.out_dim))
         return imgs
     
     def forward(self, x):
@@ -299,7 +302,7 @@ class VoxPredictor(nn.Module):
         self.pts_middle_encoder = PillarsScatter(in_channels=cfg.model.voxel_feat_dim, output_shape=canvs_size)
         self.parameters_to_train = default_param_group(self.pts_middle_encoder)
         
-        self.dit_transformer = DiT(input_size=canvs_size[0], hidden_size=384, patch_size=2, num_heads=6, in_channels=canvs_size[-1], depth=12)
+        self.dit_transformer = DiT(input_size=canvs_size[0], hidden_size=384, patch_size=2, num_heads=6, in_channels=canvs_size[-1], depth=12, out_dim=cfg.model.voxel_feat_dim)
         self.parameters_to_train += default_param_group(self.dit_transformer)
         
         
@@ -319,10 +322,11 @@ class VoxPredictor(nn.Module):
         return new_voxels_features, new_coors
         
         
-    def forward(self, vfe_feat, coor):
+    def forward(self, vfe_feat, coor, max_pooling=True):
         
         # first, we perfome sparse max pooling here
-        vfe_feat, coor = self.voxel_max_pooling(vfe_feat, coor)
+        if max_pooling:
+            vfe_feat, coor = self.voxel_max_pooling(vfe_feat, coor)
 
         voxel_feature, binary_voxel = self.pts_middle_encoder(vfe_feat, coor, 1)
         

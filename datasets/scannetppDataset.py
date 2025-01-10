@@ -164,8 +164,8 @@ class scannetppDataset(Dataset):
             for period_index, period in enumerate(self._pose_data[key]):
                 seq_len = len(period["poses"])
                 frame_ids = [i + left_offset for i in range(seq_len - extra_frames)]
-                if self.cfg.train.pretrain:
-                    frame_ids = frame_ids[0 :: (self.frame_count - 1) // 2]
+                # if self.cfg.train.pretrain:
+                #     frame_ids = frame_ids[0 :: 2]   # (self.frame_count - 1) // 2
                 seq_key_id_pairs = [(key, period_index, f_id) for f_id in frame_ids]
                 key_id_pairs += seq_key_id_pairs
         return key_id_pairs
@@ -300,8 +300,13 @@ class scannetppDataset(Dataset):
                 src_and_tgt_frame_idxs = [src_idx - left_offset + i * dilation for i in range(self.frame_count)]
                 src_and_tgt_frame_idxs = [src_idx] + [max(min(i, seq_len-1), 0) for i in src_and_tgt_frame_idxs if i != src_idx]
             elif self.cfg.dataset.frame_sampling_method  == "random":
-                target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
-                src_and_tgt_frame_idxs = [src_idx] + [max(min(i + src_idx, seq_len-1), 0) for i in target_frame_idxs.tolist() if i != 0][:self.frame_count - 1]                
+                # target_frame_idxs = torch.randperm( 4 * self.max_dilation + 1 )[:self.frame_count] - 2 * self.max_dilation
+                target_frame_idxs = torch.arange(-2 * self.max_dilation, 2 * self.max_dilation + 1)
+                target_frame_idxs = target_frame_idxs[target_frame_idxs != 0]
+                sorted_frame_idxs = sorted(target_frame_idxs.tolist(), key=lambda x: abs(x))
+                src_and_tgt_frame_idxs = [src_idx] + [
+                    max(min(i + src_idx, seq_len - 1), 0) for i in sorted_frame_idxs
+                ][:self.frame_count - 1]            
             frame_names = [0] + self.novel_frames  
         else:
             seq_key, period_idx, src_idx = self._seq_key_src_idx_pairs[index]
@@ -311,14 +316,18 @@ class scannetppDataset(Dataset):
             target_frame_idxs = torch.arange(-2 * self.max_dilation, 2 * self.max_dilation + 1)
             target_frame_idxs = target_frame_idxs[target_frame_idxs != 0]
             sorted_frame_idxs = sorted(target_frame_idxs.tolist(), key=lambda x: abs(x))
-            sorted_frame_idxs = sorted_frame_idxs[:self.frame_count - 1]
             src_and_tgt_frame_idxs = [src_idx] + [
                 max(min(i + src_idx, seq_len - 1), 0) for i in sorted_frame_idxs
-            ]
+            ][:self.frame_count - 1]
             frame_names = [0] + self.novel_frames  
         # have_depth = seq_key not in self._missing_scans
         have_depth = True
         inputs = {}
+
+        # #find some frame names close to src frame
+        # frame_name_to_index = list(zip(frame_names, src_and_tgt_frame_idxs))
+        # sorted_by_distance = sorted(frame_name_to_index, key=lambda x: abs(x[1] - src_idx))
+        # inputs['close_frame_ids'] = [name for name, _ in sorted_by_distance][:4]
 
         # Iterate over the frames and process each frame
         for frame_name, frame_idx in zip(frame_names, src_and_tgt_frame_idxs):

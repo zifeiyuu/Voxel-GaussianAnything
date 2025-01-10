@@ -6,11 +6,11 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "18_bce+rgb_nooffset" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
+  exp_name: "0.08debug2" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 1
+  batch_size: 4
   num_workers: 16
 
 train:
@@ -20,7 +20,7 @@ train:
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
   num_gpus: 1 #[1, 2, 3, 4, 5, 6]
-  load_weights_folder: false 
+  load_weights_folder: true
   load_pretrain: true
   freeze_pretrain: true
   ema:
@@ -31,10 +31,10 @@ train:
 
 optimiser:
   learning_rate: 1e-4 # 1e-4 for total bs=32 (minibatch*gpu_num)
-  num_epochs: 5
+  num_epochs: 10000
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 4
+  accumulation_steps: 1
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0
@@ -49,21 +49,21 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 100000
-  save_frequency: 5000
+  log_frequency: 10
+  save_frequency: 1000
   val_frequency: 5000
   num_keep_ckpts: 5
 
 #new
 #evaluation results save config
-save_vis: true
+save_vis: false
 video_mode: false
 original_video: false
 scene_ids: []
 output_path: ./output
 
 #ckpt path could be defined by user now
-ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/pretrain_bce+rgb_nooffset/pretrain/pretrain_ckpt  #./exp/re10k_v2/checkpoints
+ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/0.08_bce+rgb_nooffset/pretrain/ckpt #./exp/re10k_v2/checkpoints
 
 add_mask: false #only used with depth input(scannetpp)
 
