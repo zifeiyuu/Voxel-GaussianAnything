@@ -180,6 +180,17 @@ class FinalLayer(nn.Module):
         x = self.linear(x)
         return x
     
+class ConfidenceMLP(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.norm = nn.LayerNorm(input_dim, elementwise_affine=True)
+        self.linear = nn.Linear(input_dim, output_dim, bias=True)
+
+    def forward(self, x):
+        x = self.norm(x)
+        x = self.linear(x)
+        return x
+    
     
 class DiT(nn.Module):
     """
@@ -215,8 +226,9 @@ class DiT(nn.Module):
         self.blocks = nn.ModuleList([
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
-        self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
+        # self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.final_layer_feat = FinalLayer(hidden_size, patch_size, self.out_channels*self.out_dim)
+        self.confidence_mlp = ConfidenceMLP(patch_size * patch_size * self.out_channels*self.out_dim + hidden_size, patch_size * patch_size * self.out_channels)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -239,8 +251,8 @@ class DiT(nn.Module):
 
 
         # Zero-out adaLN modulation layers in DiT blocks:
-        nn.init.constant_(self.final_layer.linear.weight, 0)
-        nn.init.constant_(self.final_layer.linear.bias, 0)
+        nn.init.constant_(self.confidence_mlp.linear.weight, 0)
+        nn.init.constant_(self.confidence_mlp.linear.bias, 0)
 
     def unpatchify(self, x):
         """
@@ -284,8 +296,8 @@ class DiT(nn.Module):
         for block in self.blocks:
             x = block(x)                      # (N, T, D)
         feat = self.final_layer_feat(x)
+        x_out = self.confidence_mlp(torch.cat([feat, x], dim=-1))                # (N, T, patch_size ** 2 * out_channels)
         feat = self.unpatchify_feat(feat) 
-        x_out = self.final_layer(x)                # (N, T, patch_size ** 2 * out_channels)
         x_out = self.unpatchify(x_out)                   # (N, out_channels, H, W)
 
         return x_out, feat

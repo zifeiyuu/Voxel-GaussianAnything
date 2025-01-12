@@ -219,21 +219,27 @@ class GATModel(BaseModel):
         padding_number = 0
 
         for b in range(cfg.data_loader.batch_size):
-            pts_enc_feat = torch.cat([outputs[('pts_feat', frame_id)][b] for frame_id in self.using_frames], dim=0)
-            pts_rgb = torch.cat([outputs[('pts_rgb', frame_id)][b] for frame_id in self.using_frames], dim=0)
+            # pts_enc_feat = torch.cat([outputs[('pts_feat', frame_id)][b] for frame_id in self.using_frames], dim=0)
+            # pts_rgb = torch.cat([outputs[('pts_rgb', frame_id)][b] for frame_id in self.using_frames], dim=0)
+            pts_enc_feat = outputs[('pts_feat', 0)][b]
+            pts_rgb = outputs[('pts_rgb', 0)][b]
 
             # ONLY SRC VIEW VOXELS HERE
-            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points[b], pts_enc_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_dict[b][0], pts_enc_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
             voxels_features = self.vfe(features, num_points, coors)
 
             # # TODO: We need a corase voxel predictor
             # ### TODO: 加一个feature output 所有 voxel 都有###
             # # SRC + NOVEL VIEW VOXELS(PREDICTED)
-            # batch_binary_logits, _, batch_pred_feat = self.vox_pred(voxels_features, coors, max_pooling=True)  # batch_pred_feat (B, Z, Y, X, 64)
-            # # get gt corase voxel here
-            # batch_binary_voxel, batch_gt_voxel_centers = self.get_binary_voxels(gt_points[b])
-            # batch_binary_voxel = batch_binary_voxel.float()
-            # batch_gt_voxel_centers = batch_gt_voxel_centers.float()
+            batch_binary_logits, _, batch_pred_feat = self.vox_pred(voxels_features, coors, max_pooling=True)  # batch_pred_feat (B, Z, Y, X, 64)
+            # get gt corase voxel here
+            batch_binary_voxel, batch_gt_voxel_centers = self.get_binary_voxels(gt_points[b])
+            batch_binary_voxel = batch_binary_voxel.float()
+            batch_gt_voxel_centers = batch_gt_voxel_centers.float()
+
+            gt_coors = torch.nonzero(batch_binary_voxel == 1, as_tuple=False) # Shape: [M, 4]
+            voxels_features = torch.cat([voxels_features, batch_pred_feat[gt_coors[:, 0], gt_coors[:, 1], gt_coors[:, 2], gt_coors[:, 3]]], dim=0)
+            voxel_centers = torch.cat([voxel_centers, batch_gt_voxel_centers],dim=0)
 
             # ### 加gt binary mask ###  
             # ### Difference: train 的时候用 batch_binary_logits ###
