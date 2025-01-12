@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "0.08debug2" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
+  exp_name: "0.06rgb_bce" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
   file: "gat_config.yaml"
 
 data_loader:
@@ -27,7 +27,7 @@ train:
     use: true
     update_every: 10
     update_after_step: 100
-    beta: 0.9999
+    beta: 0.999
 
 optimiser:
   learning_rate: 1e-4 # 1e-4 for total bs=32 (minibatch*gpu_num)
@@ -40,7 +40,7 @@ optimiser:
   warmup_ratio: 1.0
   max_training_steps: 200000
   min_lr_ratio: 0.1
-  grad_clip: true
+  grad_clip: false
   max_norm: 1
 
 run:
@@ -49,8 +49,8 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 100000
-  save_frequency: 1000
+  log_frequency: 2500
+  save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5
 
@@ -63,7 +63,7 @@ scene_ids: []
 output_path: ./output
 
 #ckpt path could be defined by user now
-ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/0.08_bce+rgb_nooffset/pretrain/ckpt #./exp/re10k_v2/checkpoints
+ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/0.06rgb_bce/pretrain/ckpt #./exp/re10k_v2/checkpoints
 
 add_mask: false #only used with depth input(scannetpp)
 

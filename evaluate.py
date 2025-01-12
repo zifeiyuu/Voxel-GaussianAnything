@@ -45,6 +45,9 @@ def get_model_instance(model):
     """
     unwraps model from EMA object
     """
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        print("PARRALEL")
+        return model.module
     return model.ema_model if type(model).__name__ == "EMA" else model
 
 def generate_video(model, cfg, dataloader, device=None, video_root_path= None, scene_ids = [0], original_video = False):
@@ -135,6 +138,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     out_dir.mkdir(parents=True, exist_ok=True)
     spliced_images_list = []
     iou_list = []
+    rest_iou_list = []
     for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)], desc="Evaluating"):
         inputs = next(dataloader_iter)
 
@@ -142,7 +146,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
             if device is not None:
                 to_device(inputs, device)
             inputs["target_frame_ids"] = all_target_frame_ids
-            outputs = model(inputs)        
+            outputs = model_model(inputs)        
 
         if save_vis:
             seq_name = inputs[("frame_id", 0)][0]
@@ -190,12 +194,15 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
             spliced_images_list = []
 
         # calculate iou 
-        binary_logits, binary_voxels = outputs['binary_logits'], outputs['binary_voxel']
+        binary_logits, binary_voxels, rest_binary_voxels = outputs['binary_logits'], outputs['binary_voxel'], outputs["rest_binary_voxel"]
         rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
             (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
         ).sum()
-        print(f"iou: {rec_iou}")
+        rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
+            (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
+        ).sum()
         iou_list.append(rec_iou)
+        rest_iou_list.append(rest_iou)
 
     metric_names = ["psnr", "ssim", "lpips"]
     score_dict_by_name = {}
@@ -217,13 +224,15 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     json_content = json.dumps(score_dict_by_name, indent=4)
 
     mean_iou = sum(iou_list) / len(iou_list)
-    print(f"< Mean iou: {mean_iou}>")
+    mean_rest_iou = sum(rest_iou_list) / len(rest_iou_list)
+    print(f"< Mean iou: {mean_iou}>, < Mean Rest iou: {mean_rest_iou}>")
     # Write the combined content to the result.txt file
     result_txt_path = out_dir / "result.txt"
     with open(result_txt_path, "w") as txt_file:
         txt_file.write("\n".join(result_content) + "\n\n")
         txt_file.write(json_content)
         txt_file.write("\n" + str(mean_iou) + "\n")
+        txt_file.write("\n" + str(mean_rest_iou) + "\n")
 
     return score_dict_by_name
 
@@ -251,7 +260,7 @@ def main(cfg: DictConfig):
 
     ckpt_path = Path(cfg.ckpt_path)
     if ckpt_path.exists():
-        model.load_model(ckpt_path, ckpt_ids=0, load_optimizer=False)
+        model.load_model(ckpt_path, ckpt_ids=0, load_optimizer=False, load_ema=False)
 
     split = "test"
     save_vis = cfg.save_vis

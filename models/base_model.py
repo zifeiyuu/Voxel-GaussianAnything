@@ -242,11 +242,14 @@ class BaseModel(nn.Module):
         save_path = save_folder / f"model_{phase}_{step:07}.pth"
         logging.info(f"saving checkpoint to {str(save_path)}")
 
-        model = ema.ema_model if ema is not None else self
-        model_state = model.state_dict()
+        # Save EMA model state
+        ema_model_state = ema.ema_model.state_dict() if ema is not None else None
+        # Save current model state
+        current_model_state = self.state_dict()
 
         save_dict = {
-            "model": model_state,
+            "ema_model": ema_model_state,
+            "current_model": current_model_state,
             "version": "1.0",
             "optimiser": optimiser.state_dict(),
             "step": step,
@@ -260,7 +263,7 @@ class BaseModel(nn.Module):
             for ckpt in ckpts[num_ckpts:]:
                 ckpt.unlink()
 
-    def load_model(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0, load_optimizer=True):
+    def load_model(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0, load_optimizer=True, load_ema=False):
         """load model(s) from disk"""
         weights_path = Path(weights_path)
 
@@ -270,7 +273,11 @@ class BaseModel(nn.Module):
         logging.info(f"Loading weights from {weights_path}...")
         
         state_dict = torch.load(weights_path, map_location=torch.device(device))
-        model_dict = state_dict["model"]
+
+        if load_ema:
+            model_dict = state_dict["ema_model"]  
+        else:
+            model_dict = state_dict["current_model"]
         self.load_state_dict(model_dict, strict=False)
         
         # loading adam state
