@@ -149,12 +149,14 @@ class GATModel(BaseModel):
                 c2w = outputs[('cam_T_cam', frameid, 0)][batch_idx] if frameid != 0 else None
                 
                 mask = torch.logical_and((depth > eps), (depth < max_depth)).bool()
+                # depth[~mask] = max_depth
                 if depth[mask].numel() > 0:
                     depth[~mask] = depth[mask].max()
                 else:
                     depth[~mask] = max_depth  # Or some other default value
 
                 _pts3d, _ = depthmap_to_absolute_camera_coordinates_torch(depth, K, c2w)
+                # pts3d.append(_pts3d[mask])
                 pts3d.append(_pts3d.flatten(0, 1))
                 
                 pts3d_dict[frameid] = _pts3d.flatten(0, 1)
@@ -213,7 +215,7 @@ class GATModel(BaseModel):
         # get pre-batch point cloud here!
         gt_points, gt_points_dict = self.get_projected_points(inputs, outputs)
 
-        all_batch_outputs, binary_logits, binary_voxel = [], [], []
+        all_batch_outputs, binary_logits, binary_voxel, rest_binary_voxel_list = [], [], [], []
         padding_number = 0
 
         pts3d_moge, pts_enc_feat, pts_rgb = outputs[('pts3d', 0)], outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]
@@ -236,7 +238,7 @@ class GATModel(BaseModel):
             # batch_pred_feat = batch_pred_feat[batch_binary_voxel == 1.0]
 
             coarse_src_coors, _ = compute_voxel_coors_and_centers(gt_points_dict[b][0], voxel_size=self.coarse_voxel_size, point_cloud_range=self.pc_range)
-            padding_all_coors, padding_all_voxel_centers, padding_all_feats, rest_binary_voxel = self.padding_voxel_maxpooling_coarse(coarse_src_coors, (batch_binary_logits.sigmoid() > 0.5).float(), batch_pred_feat)
+            padding_all_coors, padding_all_voxel_centers, padding_all_feats, batch_rest_binary_voxel = self.padding_voxel_maxpooling_coarse(coarse_src_coors, (batch_binary_logits.sigmoid() > 0.5).float(), batch_pred_feat)
 
             ### 用 <src fine> combine <predicted coarse> 为了render时候增加voxel数量？
             voxel_centers = torch.cat([voxel_centers, padding_all_voxel_centers])
@@ -249,9 +251,10 @@ class GATModel(BaseModel):
             all_batch_outputs.append(output_batch)
             binary_voxel.append(batch_binary_voxel)
             binary_logits.append(batch_binary_logits)
+            rest_binary_voxel_list.append(batch_rest_binary_voxel)
             
         # save binary_voxel and binary_logits
-        binary_logits, binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0)
+        binary_logits, binary_voxel, rest_binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0), torch.cat(rest_binary_voxel_list, dim=0)
 
         all_batch_outputs = self.padding_dummy_gaussians(all_batch_outputs)
         for key, value in all_batch_outputs.items():
