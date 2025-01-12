@@ -184,12 +184,12 @@ class Trainer(nn.Module):
         losses = {}
         total_loss = 0.0
 
-        if self.cfg.loss.bce.weight > 0:
-            bce_loss, rec_iou,rest_iou = self.compute_bce_loss(outputs)
-            losses["loss/bce_loss"] = bce_loss
-            losses["loss/rec_iou"] = rec_iou
-            losses["loss/rest_iou"] = rest_iou
-            total_loss += self.cfg.loss.bce.weight * bce_loss
+        # if self.cfg.loss.bce.weight > 0:
+        #     bce_loss, rec_iou,rest_iou = self.compute_bce_loss(outputs)
+        #     losses["loss/bce_loss"] = bce_loss
+        #     losses["loss/rec_iou"] = rec_iou
+        #     losses["loss/rest_iou"] = rest_iou
+        #     total_loss += self.cfg.loss.bce.weight * bce_loss
 
         if self.cfg.loss.feature.weight > 0 and not self.warmup:
             feature_loss = self.compute_feature_loss(outputs)
