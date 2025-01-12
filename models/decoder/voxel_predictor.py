@@ -228,7 +228,7 @@ class DiT(nn.Module):
         ])
         # self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.final_layer_feat = FinalLayer(hidden_size, patch_size, self.out_channels*self.out_dim)
-        self.confidence_mlp = ConfidenceMLP(patch_size * patch_size * self.out_channels*self.out_dim + hidden_size, patch_size * patch_size * self.out_channels)
+        # self.confidence_mlp = ConfidenceMLP(patch_size * patch_size * self.out_channels*self.out_dim + hidden_size, patch_size * patch_size * self.out_channels)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -250,9 +250,9 @@ class DiT(nn.Module):
         nn.init.constant_(self.x_embedder.proj.bias, 0)
 
 
-        # Zero-out adaLN modulation layers in DiT blocks:
-        nn.init.constant_(self.confidence_mlp.linear.weight, 0)
-        nn.init.constant_(self.confidence_mlp.linear.bias, 0)
+        # # Zero-out adaLN modulation layers in DiT blocks:
+        # nn.init.constant_(self.confidence_mlp.linear.weight, 0)
+        # nn.init.constant_(self.confidence_mlp.linear.bias, 0)
 
     def unpatchify(self, x):
         """
@@ -296,11 +296,11 @@ class DiT(nn.Module):
         for block in self.blocks:
             x = block(x)                      # (N, T, D)
         feat = self.final_layer_feat(x)
-        x_out = self.confidence_mlp(torch.cat([feat, x], dim=-1))                # (N, T, patch_size ** 2 * out_channels)
+        # x_out = self.confidence_mlp(torch.cat([feat, x], dim=-1))                # (N, T, patch_size ** 2 * out_channels)
         feat = self.unpatchify_feat(feat) 
-        x_out = self.unpatchify(x_out)                   # (N, out_channels, H, W)
+        # x_out = self.unpatchify(x_out)                   # (N, out_channels, H, W)
 
-        return x_out, feat
+        return None, feat
     
     
 class VoxPredictor(nn.Module):
