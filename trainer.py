@@ -159,14 +159,16 @@ class Trainer(nn.Module):
         return cd
     
     def compute_bce_loss(self, outputs):
-        binary_logits, binary_voxels = outputs['binary_logits'], outputs['binary_voxel']
+        binary_logits, binary_voxels, rest_binary_voxels = outputs['binary_logits'], outputs['binary_voxel'], outputs["rest_binary_voxel"]
         
         bce_loss = F.binary_cross_entropy_with_logits(binary_logits, binary_voxels, reduction="mean")
         rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
             (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
         ).sum()
-            
-        return bce_loss, rec_iou
+        rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
+            (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
+        ).sum()
+        return bce_loss, rec_iou, rest_iou
     
     def compute_feature_loss(self, outputs):
         pred_feat, gt_feat = outputs["pred_feat"], outputs["gt_feat"]  # (N, 64), (N, 64)
@@ -183,9 +185,10 @@ class Trainer(nn.Module):
         total_loss = 0.0
 
         if self.cfg.loss.bce.weight > 0:
-            bce_loss, rec_iou = self.compute_bce_loss(outputs)
+            bce_loss, rec_iou,rest_iou = self.compute_bce_loss(outputs)
             losses["loss/bce_loss"] = bce_loss
             losses["loss/rec_iou"] = rec_iou
+            losses["loss/rest_iou"] = rest_iou
             total_loss += self.cfg.loss.bce.weight * bce_loss
 
         if self.cfg.loss.feature.weight > 0 and not self.warmup:
