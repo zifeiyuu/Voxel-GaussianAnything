@@ -78,7 +78,7 @@ class PillarsScatter(nn.Module):
         output_shape (list[int]): Required output shape of features.
     """
 
-    def __init__(self, in_channels, output_shape):
+    def __init__(self, in_channels, output_shape, in_channels_shrink=2):
         super().__init__()
         self.output_shape = output_shape
         self.nx = output_shape[0]
@@ -125,7 +125,6 @@ class PillarsScatter(nn.Module):
             
             canvas[:, indices[:,1], indices[:,2], indices[:,3]] = voxels.permute(1,0)
             binary_canvas[indices[:,1], indices[:,2], indices[:,3]] = 1
-
 
             # Append to a list for later stacking.
             batch_canvas.append(canvas)
@@ -206,7 +205,8 @@ class DiT(nn.Module):
         num_heads=16,
         mlp_ratio=4.0,
         learn_sigma=True,
-        out_dim=64
+        out_dim=64,
+        out_dim_expand=2
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -226,9 +226,7 @@ class DiT(nn.Module):
         self.blocks = nn.ModuleList([
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
-        # self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
-        self.final_layer_feat = FinalLayer(hidden_size, patch_size, self.out_channels*self.out_dim)
-        # self.confidence_mlp = ConfidenceMLP(patch_size * patch_size * self.out_channels*self.out_dim + hidden_size, patch_size * patch_size * self.out_channels)
+        self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -249,10 +247,9 @@ class DiT(nn.Module):
         nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
         nn.init.constant_(self.x_embedder.proj.bias, 0)
 
-
         # # Zero-out adaLN modulation layers in DiT blocks:
-        # nn.init.constant_(self.confidence_mlp.linear.weight, 0)
-        # nn.init.constant_(self.confidence_mlp.linear.bias, 0)
+        nn.init.constant_(self.final_layer.linear.weight, 0)
+        nn.init.constant_(self.final_layer.linear.bias, 0)
 
     def unpatchify(self, x):
         """
@@ -269,21 +266,6 @@ class DiT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
         return imgs
     
-    def unpatchify_feat(self, x):
-        """
-        x: (N, T, patch_size**2 * C * 64)
-        imgs: (N, H, W, C, 64)
-        """
-        c = self.out_channels
-        p = self.x_embedder.patch_size[0]
-        h = w = int(x.shape[1] ** 0.5)
-        assert h * w == x.shape[1]
-
-        x = x.reshape(shape=(x.shape[0], h, w, p, p, c, self.out_dim))
-        x = torch.einsum('nhwpqck->nchpwqk', x)
-        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p, self.out_dim))
-        return imgs
-    
     def forward(self, x):
         """
         Forward pass of DiT.
@@ -292,15 +274,12 @@ class DiT(nn.Module):
         y: (N,) tensor of class labels
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
-
         for block in self.blocks:
             x = block(x)                      # (N, T, D)
-        feat = self.final_layer_feat(x)
-        # x_out = self.confidence_mlp(torch.cat([feat, x], dim=-1))                # (N, T, patch_size ** 2 * out_channels)
-        feat = self.unpatchify_feat(feat) 
-        # x_out = self.unpatchify(x_out)                   # (N, out_channels, H, W)
+        x_out = self.final_layer(x)              # (N, T, patch_size ** 2 * out_channels)
+        x_out = self.unpatchify(x_out)                   # (N, out_channels, H, W)
 
-        return None, feat
+        return x_out, None
     
     
 class VoxPredictor(nn.Module):
@@ -310,11 +289,12 @@ class VoxPredictor(nn.Module):
 
         # scatter into a 2d canvs
         self.voxel_size_factor = cfg.model.coarse_voxel_size // cfg.model.voxel_size
+        self.dim_expand = cfg.model.dim_expand
         canvs_size = (int(abs(cfg.model.pc_range[0] - cfg.model.pc_range[3]) / cfg.model.coarse_voxel_size), int(abs(cfg.model.pc_range[1] - cfg.model.pc_range[4]) / cfg.model.coarse_voxel_size), int(abs(cfg.model.pc_range[2] - cfg.model.pc_range[5]) / cfg.model.coarse_voxel_size))
-        self.pts_middle_encoder = PillarsScatter(in_channels=cfg.model.voxel_feat_dim, output_shape=canvs_size)
+        self.pts_middle_encoder = PillarsScatter(in_channels=cfg.model.voxel_feat_dim, output_shape=canvs_size, in_channels_shrink=self.dim_expand)
         self.parameters_to_train = default_param_group(self.pts_middle_encoder)
         
-        self.dit_transformer = DiT(input_size=canvs_size[0], hidden_size=384, patch_size=2, num_heads=6, in_channels=canvs_size[-1], depth=12, out_dim=cfg.model.voxel_feat_dim)
+        self.dit_transformer = DiT(input_size=canvs_size[0], hidden_size=384, patch_size=2, num_heads=6, in_channels=canvs_size[-1], depth=12, out_dim=cfg.model.voxel_feat_dim, out_dim_expand=self.dim_expand)
         self.parameters_to_train += default_param_group(self.dit_transformer)
         
         
@@ -335,7 +315,6 @@ class VoxPredictor(nn.Module):
         
         
     def forward(self, vfe_feat, coor, max_pooling=True):
-        
         # first, we perfome sparse max pooling here
         if max_pooling:
             vfe_feat, coor = self.voxel_max_pooling(vfe_feat, coor)

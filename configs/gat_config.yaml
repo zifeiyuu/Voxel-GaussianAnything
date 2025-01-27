@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "sanity_pred_feature2" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
+  exp_name: "unet3d_debug" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
   file: "gat_config.yaml"
 
 data_loader:
@@ -27,14 +27,14 @@ train:
     use: true
     update_every: 10
     update_after_step: 100
-    beta: 0.999
+    beta: 0.99
 
 optimiser:
   learning_rate: 1e-4 # 1e-4 for total bs=32 (minibatch*gpu_num)
   num_epochs: 10000
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 1
+  accumulation_steps: 2
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0
@@ -49,7 +49,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 1000
+  log_frequency: 500
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5

@@ -4,8 +4,6 @@ import numpy as np
 from einops import rearrange
 from collections import OrderedDict
 from ..decoder.gaussian_decoder import GaussianDecoder, get_splits_and_inits
-from ..heads import head_factory
-from .dpt_gs_head import create_gs_head
 from IPython import embed
 import random
 

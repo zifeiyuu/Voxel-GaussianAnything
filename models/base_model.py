@@ -88,8 +88,8 @@ class BaseModel(nn.Module):
                 outputs[("cam_T_cam", f_i, 0)] = (T_0_inv @ T_i).half()
             else:
                 outputs[("cam_T_cam", f_i, 0)] = T_0_inv @ T_i
-
-
+        outputs[("cam_T_cam", 0, 0)] = torch.eye(4, device=T_0.device).unsqueeze(0).repeat(cfg.data_loader.batch_size, 1, 1)
+        
         if cfg.dataset.scale_pose_by_depth:
             B = cfg.data_loader.batch_size
             depth_padded = outputs[("depth_pred", 0)].detach()
@@ -127,13 +127,8 @@ class BaseModel(nn.Module):
         cfg = self.cfg
         B, _, H, W = inputs["color", 0, 0].shape
 
-        if self.predict_sh_offset and cfg.model.max_sh_degree == 0:
-            inputs_sh = self.rgb_to_sh0(inputs["color_aug", 0, 0])
-            inputs_sh = rearrange(inputs_sh, "b c h w -> b c (h w)").unsqueeze(1)
-            outputs["gauss_features_dc"] = outputs["gauss_features_dc"] + inputs_sh
-
         for scale in [0]: #cfg.model.scales:
-            pos_input_frame = outputs["gauss_means"].float()
+            pos_input_frame = outputs["gauss_means"][0].float()
             K = inputs[("K_tgt", 0)]
             device = pos_input_frame.device
             dtype = pos_input_frame.dtype
@@ -147,15 +142,13 @@ class BaseModel(nn.Module):
                     if ('cam_T_cam', 0, frame_id) not in outputs:
                         continue
                     T = outputs[('cam_T_cam', 0, frame_id)]
-                
-                pos = pos_input_frame
 
                 point_clouds = {
-                    "xyz": rearrange(pos, "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
-                    "opacity": rearrange(outputs["gauss_opacity"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
-                    "scaling": rearrange(outputs["gauss_scaling"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
-                    "rotation": rearrange(outputs["gauss_rotation"], "b n c l -> b (n l) c", n=self.cfg.model.gaussians_per_pixel),
-                    "features_dc": rearrange(outputs["gauss_features_dc"], "b n c l -> b (n l) 1 c", n=self.cfg.model.gaussians_per_pixel)
+                    "xyz": outputs["gauss_means"],
+                    "opacity": outputs["gauss_opacity"],
+                    "scaling": outputs["gauss_scaling"],
+                    "rotation": outputs["gauss_rotation"],
+                    "features_dc": outputs["gauss_features_dc"]
                 }
 
                 if cfg.model.max_sh_degree > 0:

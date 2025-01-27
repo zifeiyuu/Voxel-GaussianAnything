@@ -98,8 +98,18 @@ class Trainer(nn.Module):
         # feature level loss
         if cfg.loss.lpips.weight > 0:
             if self.step > cfg.loss.lpips.apply_after_step:
-                lpips_loss = self.lpips.to(pred.device)((pred * 2 - 1).clamp(-1,1), 
-                                   (target * 2 - 1).clamp(-1,1))
+                if torch.isnan(pred).any() or torch.isnan(target).any():
+                    print("Detected NaN values in the input tensors.")
+                    # Create a common valid mask for both tensors
+                    valid_mask = ~torch.isnan(pred) & ~torch.isnan(target)
+                    pred = pred[valid_mask]
+                    target = target[valid_mask]
+                if pred.numel() == 0 or target.numel() == 0:
+                    print("Skipping LPIPS loss computation due to empty tensors.")
+                    lpips_loss = 0
+                else: 
+                    lpips_loss = self.lpips.to(pred.device)((pred * 2 - 1).clamp(-1,1), 
+                                    (target * 2 - 1).clamp(-1,1))
                 losses["loss/lpips"] = lpips_loss
                 rec_loss += cfg.loss.lpips.weight * lpips_loss
         
@@ -181,44 +191,41 @@ class Trainer(nn.Module):
     
     def compute_pretraining_loss(self, inputs, outputs):
         cfg = self.cfg
+        B = cfg.data_loader.batch_size
         losses = {}
         total_loss = 0.0
 
-        # if self.cfg.loss.bce.weight > 0:
-        #     bce_loss, rec_iou,rest_iou = self.compute_bce_loss(outputs)
-        #     losses["loss/bce_loss"] = bce_loss
-        #     losses["loss/rec_iou"] = rec_iou
-        #     losses["loss/rest_iou"] = rest_iou
-        #     total_loss += self.cfg.loss.bce.weight * bce_loss
-
-        if self.cfg.loss.feature.weight > 0 and not self.warmup:
-            feature_loss = self.compute_feature_loss(outputs)
-            losses["loss/feature_loss"] = feature_loss
-            total_loss += self.cfg.loss.feature.weight * feature_loss
+        if self.cfg.loss.bce.weight > 0:
+            bce_loss, rec_iou,rest_iou = self.compute_bce_loss(outputs)
+            losses["loss/bce_loss"] = bce_loss
+            losses["loss/rec_iou"] = rec_iou
+            losses["loss/rest_iou"] = rest_iou
+            # total_loss += self.cfg.loss.bce.weight * bce_loss
 
         if self.cfg.model.gaussian_rendering and cfg.train.pretrain_feature:
             # regularize too big gaussians
             if (big_g_lmbd := cfg.loss.gauss_max_scale.weight) > 0:
-                scaling = outputs["gauss_scaling"]
-                big_gaussians = torch.where(scaling > cfg.loss.gauss_max_scale.thresh)
-                if len(big_gaussians[0]) > 0:
-                    big_gauss_reg_loss = torch.mean(scaling[big_gaussians])
-                else:
-                    big_gauss_reg_loss = 0
-                losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss
-                total_loss += big_g_lmbd * big_gauss_reg_loss
+                big_gauss_reg_loss = 0
+                for b in range(B):
+                    scaling = outputs["gauss_scaling"][b]
+                    big_gaussians = torch.where(scaling > cfg.loss.gauss_max_scale.thresh)
+                    if len(big_gaussians[0]) > 0:
+                        big_gauss_reg_loss += torch.mean(scaling[big_gaussians])
+
+                losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss / B
+                total_loss += big_g_lmbd * big_gauss_reg_loss / B
 
             # regularize too small gaussians
             if (small_g_lmbd := cfg.loss.gauss_min_scale.weight) > 0:
-                scaling = outputs["gauss_scaling"]
+                small_gauss_reg_loss = 0
+                for b in range(B):
+                    scaling = outputs["gauss_scaling"][b]
+                    small_gaussians = torch.where(scaling < cfg.loss.gauss_min_scale.single_thresh)
+                    if len(small_gaussians[0]) > 0:
+                        small_gauss_reg_loss += torch.mean(scaling[small_gaussians])
 
-                small_gaussians = torch.where(scaling < cfg.loss.gauss_min_scale.single_thresh)
-                if len(small_gaussians[0]) > 0:
-                    small_gauss_reg_loss = torch.mean(scaling[small_gaussians])
-                else:
-                    small_gauss_reg_loss = 0
-                losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss
-                total_loss += small_g_lmbd * small_gauss_reg_loss
+                losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss / B
+                total_loss += small_g_lmbd * small_gauss_reg_loss / B
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
@@ -357,6 +364,7 @@ class Trainer(nn.Module):
     def log_scalars(self, mode, outputs, losses, lr):
         """log the scalars"""
         cfg = self.cfg
+        B = cfg.data_loader.batch_size
         logger = self.logger
         if logger is None:
             return
@@ -367,7 +375,7 @@ class Trainer(nn.Module):
             logger.add_scalar(f"{mode}/{l}", v, self.step)
 
         if cfg.model.gaussian_rendering:
-            logger.add_scalar(f"{mode}/gauss/scale/mean", torch.mean(outputs["gauss_scaling"]).item(), self.step)
+            logger.add_scalar(f"{mode}/gauss/scale/mean", torch.mean(outputs["gauss_scaling"][0]).item(), self.step)
 
         if not cfg.train.pretrain:
             if cfg.model.gaussian_rendering:

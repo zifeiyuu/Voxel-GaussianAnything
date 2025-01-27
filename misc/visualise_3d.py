@@ -176,31 +176,11 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         # harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
         # f_rest = rearrange(outputs["gauss_features_rest"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
     else:
-        means = rearrange(outputs["gauss_means"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0, :, :3]
-        scales = rearrange(outputs["gauss_scaling"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
-        rotations = rearrange(outputs["gauss_rotation"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
-        opacities = rearrange(outputs["gauss_opacity"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]
-        harmonics = rearrange(outputs["gauss_features_dc"], "b v c n -> b (v n) c", v=gaussians_per_pixel)[0]    
-
-
-    # variables = {
-    #     'means': means,
-    #     'scales': scales,
-    #     'rotations': rotations,
-    #     'opacities': opacities,
-    #     'harmonics': harmonics
-    # }
-    # def save_variables_to_txt(variables, path):
-    #     # Create a unique filename with a timestamp
-    #     file_path = f"{str(path.parent)}/{time.time()}.txt"
-        
-    #     with open(file_path, 'w') as file:
-    #         for key, value in variables.items():
-    #             value = value.cpu().numpy()
-    #             file.write(f"{key}:\n")
-    #             np.savetxt(file, value, fmt="%f")
-    #             file.write("\n")
-    # save_variables_to_txt(variables, path)
+        means = outputs["gauss_means"][0]
+        scales = outputs["gauss_scaling"][0]
+        rotations = outputs["gauss_rotation"][0]
+        opacities = outputs["gauss_opacity"][0]
+        harmonics = outputs["gauss_features_dc"][0].squeeze(1)
 
     export_ply(
         means,
