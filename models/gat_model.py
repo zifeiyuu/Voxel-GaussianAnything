@@ -112,7 +112,7 @@ class GATModel(BaseModel):
         
         return padded_coors, voxel_centers
     
-    def padding_voxel_feature(self, src_coors, src_feat, pred_binary_canvas):
+    def padding_voxel_feature(self, src_coors, src_feat, pred_binary_canvas, copy_feature=False):
         # WARNING! This function only take bs=1 input, i.e., the first dim of coords should always be zero
         assert src_coors[..., 0].sum() == 0
         canvs_size = (
@@ -129,24 +129,25 @@ class GATModel(BaseModel):
         rest_coors = torch.nonzero(rest_binary_canvas)
         all_coors = torch.cat([src_coors, rest_coors], dim=0)
 
-        # Build KDTree and query nearest neighbors
-        occupied_coors_np = src_coors[:, 1:].cpu().numpy()  # Shape: [num_occupied, 3]
-        non_occupied_coors_np = rest_coors[:, 1:].cpu().numpy()  # Shape: [num_non_occupied, 3]
-        kd_tree = KDTree(occupied_coors_np)
-        distances, nearest_indices = kd_tree.query(non_occupied_coors_np, k=1)
-        nearest_indices = torch.tensor(nearest_indices, device=src_coors.device)  # Shape: [num_non_occupied]
-        nearest_features = feat_canvas[
-            src_coors[nearest_indices, 0], :,  
-            src_coors[nearest_indices, 1], 
-            src_coors[nearest_indices, 2], 
-            src_coors[nearest_indices, 3]  
-        ]  # Shape: [num_non_occupied, feature_dim]
-        feat_canvas[
-            rest_coors[:, 0], :,  
-            rest_coors[:, 1], 
-            rest_coors[:, 2],
-            rest_coors[:, 3]  
-        ] = nearest_features
+        if copy_feature:
+            # Build KDTree and query nearest neighbors
+            occupied_coors_np = src_coors[:, 1:].cpu().numpy()  # Shape: [num_occupied, 3]
+            non_occupied_coors_np = rest_coors[:, 1:].cpu().numpy()  # Shape: [num_non_occupied, 3]
+            kd_tree = KDTree(occupied_coors_np)
+            distances, nearest_indices = kd_tree.query(non_occupied_coors_np, k=1)
+            nearest_indices = torch.tensor(nearest_indices, device=src_coors.device)  # Shape: [num_non_occupied]
+            nearest_features = feat_canvas[
+                src_coors[nearest_indices, 0], :,  
+                src_coors[nearest_indices, 1], 
+                src_coors[nearest_indices, 2], 
+                src_coors[nearest_indices, 3]  
+            ]  # Shape: [num_non_occupied, feature_dim]
+            feat_canvas[
+                rest_coors[:, 0], :,  
+                rest_coors[:, 1], 
+                rest_coors[:, 2],
+                rest_coors[:, 3]  
+            ] = nearest_features
 
         all_feats = feat_canvas[all_coors[:, 0], :, all_coors[:, 1], all_coors[:, 2], all_coors[:, 3]] # Shape: [M, 64]
 
@@ -289,7 +290,7 @@ class GATModel(BaseModel):
             # ### Difference: train 的时候用 batch_binary_logits ###
             # # batch_pred_feat = batch_pred_feat[batch_binary_voxel == 1.0]
 
-            padding_coors, padding_voxel_centers, padding_features, rest_padding_binary_voxel = self.padding_voxel_feature(coors, voxels_features, (batch_binary_logits.sigmoid() > 0.5).float())   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
+            padding_coors, padding_voxel_centers, padding_features, rest_padding_binary_voxel = self.padding_voxel_feature(coors, voxels_features, (batch_binary_logits.sigmoid() > 0.5).float(), copy_feature=False)   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
             
             coors_list.append(padding_coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
             voxels_features_list.append(padding_features)
