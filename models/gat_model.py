@@ -10,7 +10,7 @@ import collections
 import copy
 
 from .encoder.moge_encoder import MoGe_MVEncoder
-from .encoder.voxel_encoder import prepare_hard_vfe_inputs_scatter_fast, HardVFE, compute_voxel_coors_and_centers
+from .encoder.voxel_encoder import prepare_hard_vfe_inputs_scatter_fast, prepare_voxel_features_scatter_mean, HardVFE, compute_voxel_coors_and_centers
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from .base_model import BaseModel
 from .heads.gat_head import LinearHead
@@ -48,6 +48,7 @@ class GATModel(BaseModel):
         self.cfg = cfg
         self.pre_train_flag = cfg.train.pretrain
         self.using_frames = [0] + cfg.model.gauss_novel_frames
+        self.binary_predictor = cfg.model.binary_predictor
         self.parameters_to_train = []
 
         # define the model
@@ -59,24 +60,22 @@ class GATModel(BaseModel):
 
         self.voxel_size, self.pc_range, self.coarse_voxel_size = cfg.model.voxel_size, cfg.model.pc_range, cfg.model.coarse_voxel_size
         self.voxel_size_factor = cfg.model.coarse_voxel_size // cfg.model.voxel_size
-        self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[cfg.model.voxel_feat_dim, cfg.model.voxel_feat_dim], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
-        self.parameters_to_train += [{"params": self.vfe.parameters()}]
+        # self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[cfg.model.voxel_feat_dim, cfg.model.voxel_feat_dim], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
+        # self.parameters_to_train += [{"params": self.vfe.parameters()}]
 
-        self.vox_pred = VoxPredictor(cfg)
-        self.parameters_to_train += self.vox_pred.get_parameter_groups()
+        if self.binary_predictor:
+            self.vox_pred = VoxPredictor(cfg)
+            self.parameters_to_train += self.vox_pred.get_parameter_groups()
+        
         self.coarse_canvs_size = (
             int(abs(self.pc_range[0] - self.pc_range[3]) / self.coarse_voxel_size),
             int(abs(self.pc_range[1] - self.pc_range[4]) / self.coarse_voxel_size),
             int(abs(self.pc_range[2] - self.pc_range[5]) / self.coarse_voxel_size)
         )
-        # self.positional_embedding = torch.nn.Parameter(
-        #     torch.zeros(1, cfg.model.voxel_feat_dim, self.coarse_canvs_size[2], self.coarse_canvs_size[1], self.coarse_canvs_size[1])  # Shape: (1, embed_dim, z,y,x)
-        # )
-        # self.parameters_to_train += [{'params': self.positional_embedding}]
 
         kw = dict(copy.deepcopy(cfg.model.unet3d))
         self.unet3d = Modified3DUnet(**kw)
-        self.parameters_to_train += [{"params": self.unet3d.parameters()}]
+        self.parameters_to_train += [{"params": list(self.unet3d.parameters())}]
 
         if not self.pre_train_flag:
             self.decoder_3d = PointTransformerDecoder(cfg)
@@ -162,18 +161,27 @@ class GATModel(BaseModel):
         return all_coors, all_voxel_centers, all_feats, rest_binary_canvas
     
 
-    def get_projected_points(self, inputs, outputs):
+    def get_projected_points(self, inputs, outputs, pretrain=False):
         eps, max_depth = 1e-3, 20
         # we project points from target view and novel view
         pts3d_batch = []
         pts3d_dict_batch = []
         using_frames = self.using_frames
-        for batch_idx in range(len(inputs[('depth_sparse', 0)])):    # outputs[('depth_pred', 0)]    inputs[('depth_sparse', 0)]
+        if pretrain:
+            B = len(inputs[('depth_sparse', 0)])
+        else:
+            B = outputs[('depth_pred', 0)].shape[0]
+
+        for batch_idx in range(B):    # outputs[('depth_pred', 0)]    inputs[('depth_sparse', 0)]
             pts3d = []
             pts3d_dict = {}
             for frameid in using_frames:
                 device = inputs[('K_tgt', frameid)][batch_idx].device
-                depth, K = inputs[('depth_sparse', frameid)][batch_idx].to(device), inputs[('K_tgt', frameid)][batch_idx]
+                if pretrain:
+                    depth = inputs[('depth_sparse', frameid)][batch_idx].to(device)
+                else:
+                    depth = outputs[('depth_pred', frameid)][batch_idx].squeeze(0).to(device)
+                K = inputs[('K_tgt', frameid)][batch_idx]
                 c2w = outputs[('cam_T_cam', frameid, 0)][batch_idx] if frameid != 0 else None
                 
                 mask = torch.logical_and((depth > eps), (depth < max_depth)).bool()
@@ -181,7 +189,11 @@ class GATModel(BaseModel):
                 if depth[mask].numel() > 0:
                     depth[~mask] = depth[mask].max()
                 else:
-                    depth[~mask] = max_depth  # Or some other default value
+                    if pretrain and ('depth_pred', frameid) in outputs.keys() and torch.logical_and((outputs[('depth_pred', frameid)] > eps), (outputs[('depth_pred', frameid)] < max_depth)).bool().sum() > 0:
+                        depth = outputs[('depth_pred', frameid)][batch_idx].squeeze(0).to(device)
+                    else:
+                        print("depth map error, use default depth: max depth")
+                        depth[~mask] = max_depth / 4 # Or some other default value
 
                 _pts3d, _ = depthmap_to_absolute_camera_coordinates_torch(depth, K, c2w)
                 # pts3d.append(_pts3d[mask])
@@ -259,64 +271,58 @@ class GATModel(BaseModel):
         self.encoder(inputs, outputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
         if cfg.model.gaussian_rendering:
-            self.process_gt_poses(inputs, outputs)
+            self.process_gt_poses(inputs, outputs, pretrain=True)
         # First, Voxelization and decode pre-batch data here
         # get pre-batch point cloud here!
-        gt_points, gt_points_dict = self.get_projected_points(inputs, outputs)
-
-        binary_logits, binary_voxel, rest_binary_voxel_list = [], [], []
+        gt_points, gt_points_dict = self.get_projected_points(inputs, outputs, pretrain=True)
+        outputs["gt_points"] = gt_points
         coors_list, voxels_features_list = [], []
-        padding_number = 0
-
+        binary_logits, binary_voxel, rest_binary_voxel_list = [], [], []
+        
         for b in range(cfg.data_loader.batch_size):
             pts_enc_feat = outputs[('pts_feat', 0)][b]
             pts_rgb = outputs[('pts_rgb', 0)][b]
 
             # ONLY SRC VIEW VOXELS HERE
-            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_dict[b][0], pts_enc_feat, pts_rgb, voxel_size=self.coarse_voxel_size, point_cloud_range=self.pc_range)
-            voxels_features = self.vfe(features, num_points, coors)
+            voxels_features, coors, voxel_centers = prepare_voxel_features_scatter_mean(gt_points_dict[b][0], pts_enc_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            # features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_dict[b][0], pts_enc_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            # voxels_features = self.vfe(features, num_points, coors)      
 
-            # # TODO: We need a corase voxel predictor
-            # ### TODO: 加一个feature output 所有 voxel 都有###
-            # # SRC + NOVEL VIEW VOXELS(PREDICTED)
-            batch_binary_logits, _, batch_pred_feat = self.vox_pred(voxels_features, coors, max_pooling=False)  # batch_pred_feat (B, Z, Y, X, 64)
-            # get gt corase voxel here
-            batch_binary_voxel, batch_gt_voxel_centers = self.get_binary_voxels(gt_points[b])
-            batch_binary_voxel = batch_binary_voxel.float()
-            batch_gt_voxel_centers = batch_gt_voxel_centers.float()
+            if self.binary_predictor:
+                # # SRC + NOVEL VIEW VOXELS(PREDICTED)
+                batch_binary_logits, _, batch_pred_feat = self.vox_pred(voxels_features, coors, max_pooling=True)  # batch_pred_feat (B, Z, Y, X, 64)
+                # get gt corase voxel here
+                batch_binary_voxel, batch_gt_voxel_centers = self.get_binary_voxels(gt_points[b])
+                batch_binary_voxel = batch_binary_voxel.float()
+                batch_gt_voxel_centers = batch_gt_voxel_centers.float()
+                gt_coors = torch.nonzero(batch_binary_voxel == 1, as_tuple=False) # Shape: [M, 4]
 
-            gt_coors = torch.nonzero(batch_binary_voxel == 1, as_tuple=False) # Shape: [M, 4]
-            # ### 加gt binary mask ###  
-            # ### Difference: train 的时候用 batch_binary_logits ###
-            # # batch_pred_feat = batch_pred_feat[batch_binary_voxel == 1.0]
+                padding_coors, padding_voxel_centers, padding_features, rest_padding_binary_voxel = self.padding_voxel_feature(coors, voxels_features, (batch_binary_logits.sigmoid() > 0.5).float(), copy_feature=False)   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
+                
+                coors = padding_coors
+                voxels_features = padding_features
 
-            padding_coors, padding_voxel_centers, padding_features, rest_padding_binary_voxel = self.padding_voxel_feature(coors, voxels_features, (batch_binary_logits.sigmoid() > 0.5).float(), copy_feature=False)   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
-            
-            coors_list.append(padding_coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
-            voxels_features_list.append(padding_features)
-            
-            binary_voxel.append(batch_binary_voxel)
-            binary_logits.append(batch_binary_logits)
-            rest_binary_voxel_list.append(rest_padding_binary_voxel)
+                binary_voxel.append(batch_binary_voxel)
+                binary_logits.append(batch_binary_logits)
+                rest_binary_voxel_list.append(rest_padding_binary_voxel)
 
-        # Normalize K
-        K_normalized = inputs[("K_src", 0)].clone().unsqueeze(1)
-        W_tensor = torch.tensor(W, device=K_normalized.device, dtype=K_normalized.dtype)
-        H_tensor = torch.tensor(H, device=K_normalized.device, dtype=K_normalized.dtype)
-        K_normalized[..., 0, :] /= W_tensor[..., None]
-        K_normalized[..., 1, :] /= H_tensor[..., None]
+            coors_list.append(coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
+            voxels_features_list.append(voxels_features)
+
+        K_6d = self.intrinsic_matrix_to_6d(inputs[("K_src", 0)], H, W)
         img_features = rearrange(outputs[('pts_feat', 0)].unsqueeze(1), "b n (h w) c -> b n c h w", h=H, w=W)
         #3D UNET
-        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.unet3d(coors_list, [self.coarse_voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_normalized)
+        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.unet3d(coors_list, [self.voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_6d)
         outputs["gauss_means"] = position_list
         outputs["gauss_opacity"] = opacity_list
         outputs["gauss_scaling"] = scaling_list
         outputs["gauss_rotation"] = rotation_list
         outputs["gauss_features_dc"] = feat_dc_list
 
-        # save binary_voxel and binary_logits
-        binary_logits, binary_voxel, rest_binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0), torch.cat(rest_binary_voxel_list, dim=0)
-        outputs["binary_logits"], outputs["binary_voxel"], outputs["rest_binary_voxel"] = binary_logits, binary_voxel, rest_binary_voxel
+        if self.binary_predictor:
+            # save binary_voxel and binary_logits
+            binary_logits, binary_voxel, rest_binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0), torch.cat(rest_binary_voxel_list, dim=0)
+            outputs["binary_logits"], outputs["binary_voxel"], outputs["rest_binary_voxel"] = binary_logits, binary_voxel, rest_binary_voxel
 
         if cfg.model.gaussian_rendering:
             self.render_images(inputs, outputs)
@@ -422,6 +428,21 @@ class GATModel(BaseModel):
 
         return outputs
     
+    def intrinsic_matrix_to_6d(self, K, h, w):
+        """
+        Convert intrinsic matrix [B, 3, 3] to [B, N, 6] where N=1.
+        """
+        B = K.shape[0]
+
+        fx = K[:, 0, 0]  # Focal length in x
+        fy = K[:, 1, 1]  # Focal length in y
+        cx = K[:, 0, 2]  # Principal point x
+        cy = K[:, 1, 2]  # Principal point y
+
+        intrinsics_6d = torch.stack([fx, fy, cx, cy, torch.full_like(fx, w), torch.full_like(fy, h)], dim=-1)
+
+        return intrinsics_6d.unsqueeze(1)
+
     def padding_dummy_gaussians(self, outputs):
         # This func is using for padding dummy gaussian for batchify the rendering process
         # we padd a very far away gaussians with 0 opacity, try not to affect the rendering process, although it might be little slow

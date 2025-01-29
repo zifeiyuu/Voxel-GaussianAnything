@@ -63,7 +63,7 @@ class BaseModel(nn.Module):
         return self.training
 
     @torch.no_grad()
-    def process_gt_poses(self, inputs, outputs):
+    def process_gt_poses(self, inputs, outputs, pretrain=False):
         cfg = self.cfg
         keyframe = 0
         for f_i in self.target_frame_ids(inputs):
@@ -92,7 +92,11 @@ class BaseModel(nn.Module):
         
         if cfg.dataset.scale_pose_by_depth:
             B = cfg.data_loader.batch_size
-            depth_padded = outputs[("depth_pred", 0)].detach()
+            if pretrain:
+                depth_padded = torch.stack(inputs[('depth_sparse', 0)]).unsqueeze(1).detach()
+            else:
+                depth_padded = outputs[("depth_pred", 0)].detach()
+            
             # only use the depth in the unpadded image for scale estimation
             depth = depth_padded[:, :, 
                                  self.cfg.dataset.pad_border_aug:depth_padded.shape[2]-self.cfg.dataset.pad_border_aug,

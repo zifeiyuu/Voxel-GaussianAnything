@@ -81,6 +81,13 @@ class Trainer(nn.Module):
         """Computes reprojection loss between a batch of predicted and target images
         """
         cfg = self.cfg
+        if torch.isnan(pred).any() or torch.isnan(target).any():
+            print("Detected NaN values in the input tensors.")
+            # valid_mask = ~torch.isnan(pred) & ~torch.isnan(target)
+            # pred[~valid_mask] = 0  # Replace invalid values with 0
+            # target[~valid_mask] = 0
+            pred = torch.nan_to_num(pred, nan=0.0)
+            target = torch.nan_to_num(target, nan=0.0)
         rec_loss = 0.0
         # pixel level loss
         if cfg.loss.mse.weight > 0:
@@ -98,18 +105,8 @@ class Trainer(nn.Module):
         # feature level loss
         if cfg.loss.lpips.weight > 0:
             if self.step > cfg.loss.lpips.apply_after_step:
-                if torch.isnan(pred).any() or torch.isnan(target).any():
-                    print("Detected NaN values in the input tensors.")
-                    # Create a common valid mask for both tensors
-                    valid_mask = ~torch.isnan(pred) & ~torch.isnan(target)
-                    pred = pred[valid_mask]
-                    target = target[valid_mask]
-                if pred.numel() == 0 or target.numel() == 0:
-                    print("Skipping LPIPS loss computation due to empty tensors.")
-                    lpips_loss = 0
-                else: 
-                    lpips_loss = self.lpips.to(pred.device)((pred * 2 - 1).clamp(-1,1), 
-                                    (target * 2 - 1).clamp(-1,1))
+                lpips_loss = self.lpips.to(pred.device)((pred * 2 - 1).clamp(-1,1), 
+                                (target * 2 - 1).clamp(-1,1))
                 losses["loss/lpips"] = lpips_loss
                 rec_loss += cfg.loss.lpips.weight * lpips_loss
         
@@ -142,27 +139,12 @@ class Trainer(nn.Module):
         cfg = self.cfg
         eps = 1e-3
 
-        frames = [0] + cfg.model.gauss_novel_frames
-        recon_pts = outputs['recon_pts']
+        recon_pts = outputs["gauss_means"]
         cd, chamferDistance = 0.0, ChamferDistance()
         for bs, scale in enumerate(outputs[('depth_scale', 0)]):
-            # step1: use the aligned depth map to get the pointcloud
-            scene_pts = []
-            scene_recon_pts = recon_pts[bs].squeeze()
-            for frame in frames:
-                depth, K = inputs[('depth_sparse', frame)][bs].cuda() * scale, inputs[('K_tgt', frame)][bs]
-
-                valid_mask = torch.logical_and((depth > eps), (depth < 20.0)).bool()
-                pts3d, _ = depthmap_to_camera_coordinates_torch(depth, K)
-                pts3d = pts3d[valid_mask]
-                if frame != 0:
-                    c2w = outputs[('cam_T_cam', frame, 0)][bs]
-                    pts3d_homo = torch.cat([pts3d, torch.ones_like(pts3d)[..., 0: 1]], dim=-1)
-                    pts3d = (c2w @ pts3d_homo.T).T[..., :3]
-                    
-                scene_pts.append(pts3d)
-
-            scene_pts = torch.cat(scene_pts) 
+            scene_recon_pts = recon_pts[bs]
+            scene_pts = outputs["gt_points"][bs]
+            
             # no bidirection here, cd should have direction
             cd += chamferDistance(scene_recon_pts.unsqueeze(0), scene_pts.unsqueeze(0))
             
@@ -195,14 +177,20 @@ class Trainer(nn.Module):
         losses = {}
         total_loss = 0.0
 
-        if self.cfg.loss.bce.weight > 0:
+        if self.cfg.loss.bce.weight > 0 and cfg.model.binary_predictor:
             bce_loss, rec_iou,rest_iou = self.compute_bce_loss(outputs)
             losses["loss/bce_loss"] = bce_loss
             losses["loss/rec_iou"] = rec_iou
             losses["loss/rest_iou"] = rest_iou
-            # total_loss += self.cfg.loss.bce.weight * bce_loss
+            total_loss += self.cfg.loss.bce.weight * bce_loss
 
-        if self.cfg.model.gaussian_rendering and cfg.train.pretrain_feature:
+        # regularize cd
+        if cfg.loss.soft_cd.weight > 0:
+            cd_loss = self.compute_cd_loss(inputs, outputs)
+            losses["loss/cd_loss"] = cd_loss
+            total_loss += cfg.loss.soft_cd.weight * cd_loss
+
+        if self.cfg.model.gaussian_rendering:
             # regularize too big gaussians
             if (big_g_lmbd := cfg.loss.gauss_max_scale.weight) > 0:
                 big_gauss_reg_loss = 0
@@ -232,6 +220,7 @@ class Trainer(nn.Module):
                 frame_ids = self.model.module.all_frame_ids(inputs)[:4]
             else:
                 frame_ids = self.model.all_frame_ids(inputs)[:4]
+
             rec_loss = 0
             for frame_id in frame_ids:
                 # compute gaussian reconstruction loss
@@ -239,13 +228,13 @@ class Trainer(nn.Module):
                 target = target[:,:,cfg.dataset.pad_border_aug:target.shape[2]-cfg.dataset.pad_border_aug,
                                 cfg.dataset.pad_border_aug:target.shape[3]-cfg.dataset.pad_border_aug,]
                 pred = outputs[("color_gauss", frame_id, 0)]
+
                 rec_loss += self.compute_reconstruction_loss(pred, target, losses)
             rec_loss /= len(frame_ids)
             losses["loss/rec"] = rec_loss
             total_loss += rec_loss
 
         losses["loss/total"] = total_loss
-
         return losses
 
     

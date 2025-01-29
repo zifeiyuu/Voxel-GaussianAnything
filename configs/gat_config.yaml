@@ -16,7 +16,6 @@ data_loader:
 train:
   pretrain: true
   pretrain_warmup: -1
-  pretrain_feature: true
   logging: false 
   mixed_precision: 32-true # 32-true 16-mixed
   num_gpus: 1 #[1, 2, 3, 4, 5, 6]
@@ -34,7 +33,7 @@ optimiser:
   num_epochs: 10000
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 2
+  accumulation_steps: 1
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0

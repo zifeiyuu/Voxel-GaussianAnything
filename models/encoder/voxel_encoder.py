@@ -4,6 +4,7 @@ from torch.nn import functional as F
 from torch import Tensor, nn
 
 import torch
+from torch_scatter import scatter_mean
 
 def compute_voxel_coors_and_centers(
     pts3d: torch.Tensor,      # (N, 3)
@@ -164,6 +165,58 @@ def prepare_hard_vfe_inputs_scatter_fast(
     ], dim=1)  # [M, 3]
 
     return features, num_points, coors, voxel_centers
+
+def prepare_voxel_features_scatter_mean(
+    pts3d: torch.Tensor,      # (N, 3) 3D points
+    pts_feat: torch.Tensor,   # (N, D) Point features
+    pts_rgb: torch.Tensor,    # (N, 3) RGB colors
+    voxel_size: float = 0.02,
+    point_cloud_range=(0, 0, 0, 0, 0, 0)
+):
+    device = pts3d.device
+    N = pts3d.size(0)
+
+    grid_min = torch.tensor(point_cloud_range[:3], dtype=torch.float32, device=device)
+    grid_max = torch.tensor(point_cloud_range[3:], dtype=torch.float32, device=device)
+    voxel_indices = torch.floor((pts3d - grid_min) / voxel_size).long()  # (N, 3)
+
+    voxel_dims = ((grid_max - grid_min) / voxel_size).long()
+    mask_min = (voxel_indices >= 0).all(dim=1)
+    mask_max = (voxel_indices < voxel_dims).all(dim=1)
+    valid_mask = mask_min & mask_max
+
+    pts3d = pts3d[valid_mask]
+    pts_feat = pts_feat[valid_mask]
+    pts_rgb = pts_rgb[valid_mask]
+    voxel_indices = voxel_indices[valid_mask]
+
+    voxel_hash = (
+          voxel_indices[:, 2] * 10**6  # z
+        + voxel_indices[:, 1] * 10**3  # y
+        + voxel_indices[:, 0]          # x
+    )
+
+    unique_voxel_hash, inverse_indices = torch.unique(voxel_hash, return_inverse=True)
+    M = unique_voxel_hash.size(0)  # Number of unique voxels
+
+    scatter_features = torch.cat([pts_feat], dim=1)  # (N_valid, C)
+    voxel_features = scatter_mean(scatter_features, inverse_indices, dim=0)  # (M, C)
+
+    z = (unique_voxel_hash // 10**6).long()
+    yz = (unique_voxel_hash % 10**6).long()
+    y = (yz // 10**3).long()
+    x = (yz % 10**3).long()
+
+    batch_idx = torch.zeros_like(z, dtype=torch.long)
+    coors = torch.stack([batch_idx, z, y, x], dim=1)  # (M, 4)
+
+    voxel_centers = torch.stack([
+        x.float() * voxel_size + grid_min[0] + voxel_size / 2,
+        y.float() * voxel_size + grid_min[1] + voxel_size / 2,
+        z.float() * voxel_size + grid_min[2] + voxel_size / 2
+    ], dim=1)  # [M, 3]
+
+    return voxel_features, coors, voxel_centers
 
 def get_paddings_indicator(actual_num: Tensor,
                            max_num: Tensor,

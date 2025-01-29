@@ -16,6 +16,7 @@ import fvdb
 import fvdb.nn as fvnn
 from fvdb import GridBatch, JaggedTensor
 from fvdb.nn import VDBTensor
+from torch_scatter import scatter_mean
 from IPython import embed
 
 class depth_wrapper(nn.Module):
@@ -564,6 +565,29 @@ class Modified3DUnet(nn.Module):
             raise NotImplementedError 
         
         return rel_pos
+    
+    def camera_intrinsic_list_to_matrix(self, intrinsic_list, normalize_pixel=False):
+        """
+        Args:
+            intrinsic_list: [..., 6]
+                [fx, fy, cx, cy, w, h]
+        """
+        if isinstance(intrinsic_list, list):
+            intrinsic_list = torch.stack(intrinsic_list)
+        fx, fy, cx, cy, w, h = intrinsic_list.unbind(-1)
+        intrinsic_matrix = torch.zeros(intrinsic_list.shape[:-1] + (3, 3), device=intrinsic_list.device)
+
+        intrinsic_matrix[..., 0, 0] = fx
+        intrinsic_matrix[..., 1, 1] = fy
+        intrinsic_matrix[..., 0, 2] = cx
+        intrinsic_matrix[..., 1, 2] = cy
+        intrinsic_matrix[..., 2, 2] = 1
+
+        if normalize_pixel:
+            intrinsic_matrix[..., 0, :] /= w[..., None]
+            intrinsic_matrix[..., 1, :] /= h[..., None]
+
+        return intrinsic_matrix
 
     def _encode(self, x: fvnn.VDBTensor, hash_tree: dict, is_forward: bool = True):
         feat_depth = 0
@@ -611,7 +635,6 @@ class Modified3DUnet(nn.Module):
         
         struct_decision = None
         feat_depth = self.num_blocks - 1
-        count = 0
         for module, upsampler, struct_conv in zip(
                 [None] + list(self.decoders), [None] + list(self.upsamplers), self.struct_convs):  
             if module is not None:
@@ -641,7 +664,7 @@ class Modified3DUnet(nn.Module):
                 grid = x.grid
 
                 world_to_camera = torch.inverse(camera_pose) # [B, N, 4, 4]
-                input_camera_K = intrinsics # [B, N, 3, 3]
+                input_camera_K = self.camera_intrinsic_list_to_matrix(intrinsics, normalize_pixel=True) # [B, N, 3, 3]
                 world_to_image = torch.einsum('bnij,bnjk->bnik', input_camera_K, world_to_camera[...,:3,:4]) # [B, N, 3, 4]
      
                 for bidx in range(grid.grid_count):
@@ -718,7 +741,7 @@ class Modified3DUnet(nn.Module):
 
         return abs_pos.float(), scaling, rotation, opacity, color.unsqueeze(1) # for rasterizer
     
-    def forward(self, coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics):
+    def forward(self, coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics, use_point=False):
         # coors list[N, 3]
         # voxel_sizes [x, x, x]
         # origins [x, x, x]
@@ -729,16 +752,29 @@ class Modified3DUnet(nn.Module):
         
         batch_size = intrinsics.shape[0]
 
-        x_grid = fvdb.gridbatch_from_ijk(
-            fvdb.JaggedTensor(coors),  
-            voxel_sizes=[voxel_sizes for _ in range(batch_size)],
-            origins=[origins for _ in range(batch_size)]
-        )
+        if not use_point:
+            x_grid = fvdb.gridbatch_from_ijk(
+                fvdb.JaggedTensor(coors),  
+                voxel_sizes=[voxel_sizes for _ in range(batch_size)],
+                origins=[origins for _ in range(batch_size)]
+            )
+        else:
+            x_grid = fvdb.gridbatch_from_points(
+                fvdb.JaggedTensor(coors),  
+                voxel_sizes=[voxel_sizes for _ in range(batch_size)],
+                origins=[origins for _ in range(batch_size)]
+            )
         allbatch_voxel_features = torch.cat(voxel_features, dim=0)
 
         x = fvnn.VDBTensor(x_grid, x_grid.jagged_like(allbatch_voxel_features))
 
         n_imgs, H, W = img_features.size(1), img_features.size(3), img_features.size(4)
+
+        if (H != intrinsics[..., 5]).all() or (W != intrinsics[..., 4]).all():
+            downsample_h = intrinsics[0, 0, 5] / H
+            downsample_w = intrinsics[0, 0, 4] / W
+            intrinsics[..., [1,3,5]] = intrinsics[..., [1,3,5]] / downsample_h
+            intrinsics[..., [0,2,4]] = intrinsics[..., [0,2,4]] / downsample_w
 
         # build a hash tree
         hash_tree = self.build_normal_hash_tree(x.grid)
@@ -747,3 +783,107 @@ class Modified3DUnet(nn.Module):
         
         return position_list, opacity_list, scaling_list, rotation_list, feat_dc_list
 
+
+class Lifter(nn.Module):
+    def __init__(self, img_feature_source, img_in_dim, voxel_out_dim):
+        super().__init__()
+        self.img_feature_source = img_feature_source
+        self.mix_fc = nn.Linear(img_in_dim, voxel_out_dim)
+
+    def create_rays_from_intrinsic_torch_batch(self, pose_matric, intrinsic):
+        """
+        Args:
+            pose_matric: (B, 4, 4)
+            intrinsic: (B, 6), [fx, fy, cx, cy, w, h]
+        Returns:
+            camera_origin: (B, 3)
+            d: (B, H, W, 3)
+        """
+        camera_origin = pose_matric[:, :3, 3] # (B, 3)
+        fx, fy, cx, cy, w, h = intrinsic.unbind(1) # [B,]
+        w, h = int(w[0]), int(h[0])
+        # attention, indexing is 'xy'
+        ii, jj = torch.meshgrid(torch.arange(w).to(intrinsic.device), torch.arange(h).to(intrinsic.device), indexing='xy') 
+
+        ii = ii[None].repeat(pose_matric.shape[0], 1, 1) # (B, H, W)
+        jj = jj[None].repeat(pose_matric.shape[0], 1, 1) # (B, H, W)
+
+        uu, vv = (ii - cx[:, None, None]) / fx[:, None, None], (jj - cy[:, None, None]) / fy[:, None, None]
+        local_xyz = torch.stack([uu, vv, torch.ones_like(uu, device=uu.device)], dim=-1) # (B, H, W, 3)
+        local_xyz = torch.cat([local_xyz, torch.ones((local_xyz.shape[0], int(h), int(w), 1)).to(local_xyz)], axis=-1)
+        pixel_xyz = torch.einsum('bij, bhwj->bhwi', pose_matric, local_xyz)[:, :, :, :3] # (B, H, W, 3) # ! fix error
+
+        d = (pixel_xyz - camera_origin[:, None, None, :])  # (B, H, W, 3)
+        # normalize the direction
+        d = d / torch.norm(d, dim=-1, keepdim=True) # (B, H, W, 3)
+
+        return camera_origin, d
+
+    def build_ray_casting_feature(self, grid, camera_pose, intrinsics, img_features):
+        """
+        This is previous `build_occulusion_feature_cube`, I use the new name for more accurate meaning
+
+        We unproject the image pixels to the voxel grid, and assign the pixel feature to the voxel grid,
+        then return the voxel feature for each voxel.
+
+        Args:
+            grid: len(grid) == B
+            img_features: [B, N, C, H, W]
+            camera_pose: [B, N, 4, 4]
+            intrinsics: [B, N, 6], 6 is fx fy cx cy w h
+
+        Returns:
+            voxel_features: JaggedTensor
+        """
+
+        voxel_features = []
+        n_imgs, H, W = img_features.size(1), img_features.size(3), img_features.size(4)
+        # update the batch[DS.IMAGES_INPUT_INTRINSIC]
+        if (H != intrinsics[..., 5]).all() or (W != intrinsics[..., 4]).all():
+            downsample_h = intrinsics[0, 0, 5] / H
+            downsample_w = intrinsics[0, 0, 4] / W
+            intrinsics[..., [1,3,5]] = intrinsics[..., [1,3,5]] / downsample_h
+            intrinsics[..., [0,2,4]] = intrinsics[..., [0,2,4]] / downsample_w
+
+        for bidx in range(grid.grid_count):
+            cur_grid = grid[bidx]
+            cur_pose = camera_pose[bidx] # N, 4, 4
+            cur_intrinsics = intrinsics[bidx]
+
+            # [N, 3], [N, H, W, 3] -> [N * H * W, 3]
+            nimg_origins, nimg_directions = self.create_rays_from_intrinsic_torch_batch(cur_pose, cur_intrinsics)
+            nimg_origins = nimg_origins.view(n_imgs, 1, 1, 3).expand(-1, H, W, -1).reshape(-1, 3)
+            nimg_directions = nimg_directions.reshape(-1, 3)
+
+            nimg_features = img_features[bidx] # N, C, H, W
+            nimg_features = nimg_features.permute(0, 2, 3, 1).view(n_imgs * H * W, -1) # N, C, H, W -> N, H, W, C -> N * H * W, C
+
+            if fvdb.__version__ == '0.0.0':
+                pack_info, out_voxel_ijk, _ = cur_grid.voxels_along_rays(JaggedTensor([nimg_origins]), 
+                                                                         JaggedTensor([nimg_directions]), 
+                                                                         max_voxels=1)
+                out_voxel_ids = cur_grid.ijk_to_index(out_voxel_ijk)
+                pixel_feature = nimg_features[pack_info.jdata[:, 1] > 0, :]
+            else:
+                out_voxel_ids, ray_start_end = cur_grid.voxels_along_rays(JaggedTensor([nimg_origins]), 
+                                                                         JaggedTensor([nimg_directions]), 
+                                                                         max_voxels=1, 
+                                                                         return_ijk=False)
+
+                mask = (ray_start_end.joffsets[1:] - ray_start_end.joffsets[:-1]).bool() # [N_ray]
+                pixel_feature = nimg_features[mask, :] # [N_ray_hit, C]
+                out_voxel_ids = out_voxel_ids.jdata.to(torch.int64)
+                
+            out_voxel_features = torch.zeros((cur_grid.total_voxels, nimg_features.shape[1]), device=cur_pose.device)
+            out_voxel_features = scatter_mean(pixel_feature, out_voxel_ids, out=out_voxel_features, dim=0)
+
+            voxel_features.append(out_voxel_features)
+
+        voxel_features = torch.cat(voxel_features, dim=0)
+
+        return voxel_features
+
+    def forward(self, grid, camera_pose, intrinsics, img_features):
+        voxel_features = self.build_ray_casting_feature(grid, camera_pose, intrinsics, img_features)
+        voxel_features = self.mix_fc(voxel_features)
+        return voxel_features

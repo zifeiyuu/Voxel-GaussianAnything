@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from einops import rearrange
-
+from IPython import embed
 
 def estimate_depth_scale_kitti(depth, depth_gt):
     """
@@ -60,8 +60,12 @@ def estimate_depth_scale_by_depthmap(depth, tgt_depth, max_depth=20):
     tgt_depth = tgt_depth.to(device)
     
     valid_mask = torch.logical_and((tgt_depth > eps), (tgt_depth < max_depth)).bool()
+    if valid_mask.sum() == 0:  # Checks if all are False
+        print("Warning: No valid depth values found! GT depth map has problem")
+        return torch.tensor(1.0, device=device, dtype=depth.dtype)
     # scale = (depth.squeeze()[valid_mask].log() - tgt_depth[valid_mask].log()).mean().exp()
     scale = depth.squeeze()[valid_mask].median() / tgt_depth[valid_mask].median()
+
     return scale
 
 def estimate_depth_scale_bias(depth, tgt_depth, max_depth=20):

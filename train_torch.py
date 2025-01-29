@@ -40,9 +40,9 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
         
         losses, outputs = trainer(inputs)
             
-        loss_total = losses["loss/total"] / accumulation_steps           
+        loss_total = losses["loss/total"] / accumulation_steps     
 
-        loss_total.backward()  # Backpropagate the scaled loss
+        loss_total.backward() # Backpropagate the scaled loss
 
         if cfg.optimiser.grad_clip:
             # Gradient clipping
