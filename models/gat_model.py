@@ -162,6 +162,7 @@ class GATModel(BaseModel):
     
 
     def get_projected_points(self, inputs, outputs, pretrain=False):
+        depth_error = False
         eps, max_depth = 1e-3, 20
         # we project points from target view and novel view
         pts3d_batch = []
@@ -189,6 +190,7 @@ class GATModel(BaseModel):
                 if depth[mask].numel() > 0:
                     depth[~mask] = depth[mask].max()
                 else:
+                    depth_error = True
                     if pretrain and ('depth_pred', frameid) in outputs.keys() and torch.logical_and((outputs[('depth_pred', frameid)] > eps), (outputs[('depth_pred', frameid)] < max_depth)).bool().sum() > 0:
                         depth = outputs[('depth_pred', frameid)][batch_idx].squeeze(0).to(device)
                     else:
@@ -205,7 +207,7 @@ class GATModel(BaseModel):
             
             pts3d_batch.append(pts3d)
             pts3d_dict_batch.append(pts3d_dict)
-        return pts3d_batch, pts3d_dict_batch
+        return pts3d_batch, pts3d_dict_batch, depth_error
     
     
     def get_binary_voxels(self, points):
@@ -274,8 +276,9 @@ class GATModel(BaseModel):
             self.process_gt_poses(inputs, outputs, pretrain=True)
         # First, Voxelization and decode pre-batch data here
         # get pre-batch point cloud here!
-        gt_points, gt_points_dict = self.get_projected_points(inputs, outputs, pretrain=True)
+        gt_points, gt_points_dict, depth_error = self.get_projected_points(inputs, outputs, pretrain=True)
         outputs["gt_points"] = gt_points
+        outputs["error"] = depth_error
         coors_list, voxels_features_list = [], []
         binary_logits, binary_voxel, rest_binary_voxel_list = [], [], []
         
