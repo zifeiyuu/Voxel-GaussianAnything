@@ -117,6 +117,7 @@ class BaseModel(nn.Module):
 
             for f_i in self.target_frame_ids(inputs):
                 T = outputs[("cam_T_cam", 0, f_i)]
+                scale = scale.to(T.device)
                 T[:, :3, 3] = T[:, :3, 3] * scale
                 outputs[("cam_T_cam", 0, f_i)] = T
                 T = outputs[("cam_T_cam", f_i, 0)]

@@ -57,8 +57,7 @@ def estimate_depth_scale_by_depthmap(depth, tgt_depth, max_depth=20):
 
     eps = 1e-3
     device = depth.device
-    tgt_depth = tgt_depth.to(device)
-    
+    tgt_depth = tgt_depth.to(device)   
     valid_mask = torch.logical_and((tgt_depth > eps), (tgt_depth < max_depth)).bool()
     if valid_mask.sum() == 0:  # Checks if all are False
         print("Warning: No valid depth values found! GT depth map has problem")
