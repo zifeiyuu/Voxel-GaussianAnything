@@ -64,3 +64,4 @@ voxel_feat_dim: 32
 dim_expand: 4
 
 binary_predictor: false
+direct_gaussian: false

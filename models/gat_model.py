@@ -49,6 +49,7 @@ class GATModel(BaseModel):
         self.pre_train_flag = cfg.train.pretrain
         self.using_frames = [0] + cfg.model.gauss_novel_frames
         self.binary_predictor = cfg.model.binary_predictor
+        self.direct_gaussian = cfg.model.direct_gaussian
         self.parameters_to_train = []
 
         # define the model
@@ -71,8 +72,9 @@ class GATModel(BaseModel):
         self.unet3d = Modified3DUnet(**kw)
         self.parameters_to_train += [{"params": list(self.unet3d.parameters())}]
 
-        self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias, predict_offset=cfg.model.predict_offset)
-        self.parameters_to_train += self.decoder_gs.get_parameter_groups()
+        if self.direct_gaussian:
+            self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias, predict_offset=cfg.model.predict_offset)
+            self.parameters_to_train += self.decoder_gs.get_parameter_groups()
         
     def padding_voxel_feature(self, src_coors, src_feat, pred_binary_canvas, downsample_ratio=0.2):
         """
@@ -349,14 +351,15 @@ class GATModel(BaseModel):
         # TODO: Add multive image and voxel predictor 
         self.encoder(inputs, outputs) # (B, N, 3), (B, N, C), (B, N, 3)
 
-        out = self.decoder_gs([outputs[('pts_feat', 0)]])
-        outputs["gauss_means"] = [outputs[("pts3d", 0)][b] + out["gauss_offset"][b] for b in range(B)]
-        outputs["gauss_opacity"] = [out["gauss_opacity"][b] for b in range(B)]
-        outputs["gauss_scaling"] = [out["gauss_scaling"][b] for b in range(B)]
-        outputs["gauss_rotation"] = [out["gauss_rotation"][b] for b in range(B)]
-        outputs["gauss_features_dc"] = [out["gauss_features_dc"][b] for b in range(B)]
-        outputs["gauss_offset"] = out["gauss_offset"] #unused in render
-        del out
+        if self.direct_gaussian:
+            out = self.decoder_gs([outputs[('pts_feat', 0)]])
+            outputs["gauss_means"] = [outputs[("pts3d", 0)][b] + out["gauss_offset"][b] for b in range(B)]
+            outputs["gauss_opacity"] = [out["gauss_opacity"][b] for b in range(B)]
+            outputs["gauss_scaling"] = [out["gauss_scaling"][b] for b in range(B)]
+            outputs["gauss_rotation"] = [out["gauss_rotation"][b] for b in range(B)]
+            outputs["gauss_features_dc"] = [out["gauss_features_dc"][b] for b in range(B)]
+            outputs["gauss_offset"] = out["gauss_offset"] #unused in render
+            del out
 
         self.process_gt_poses(inputs, outputs, pretrain=self.pre_train_flag)
         # First, Voxelization and decode pre-batch data here
@@ -400,18 +403,21 @@ class GATModel(BaseModel):
         img_features = rearrange(torch.cat([outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]], dim=-1).unsqueeze(1), "b n (h w) c -> b n c h w", h=H, w=W)
         #3D UNET
         position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.unet3d(coors_list, [self.voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_6d)
-        # outputs["gauss_means"] = position_list
-        # outputs["gauss_opacity"] = opacity_list
-        # outputs["gauss_scaling"] = scaling_list
-        # outputs["gauss_rotation"] = rotation_list
-        # outputs["gauss_features_dc"] = feat_dc_list
-        for b in range(B):
-            outputs["gauss_means"][b] = torch.cat([outputs["gauss_means"][b], position_list[b]], dim=0)
-            outputs["gauss_opacity"][b] = torch.cat([outputs["gauss_opacity"][b], opacity_list[b]], dim=0)
-            outputs["gauss_scaling"][b] = torch.cat([outputs["gauss_scaling"][b], scaling_list[b]], dim=0)
-            outputs["gauss_rotation"][b] = torch.cat([outputs["gauss_rotation"][b], rotation_list[b]], dim=0)
-            outputs["gauss_features_dc"][b] = torch.cat([outputs["gauss_features_dc"][b], feat_dc_list[b]], dim=0)
 
+        if self.direct_gaussian:
+            for b in range(B):
+                outputs["gauss_means"][b] = torch.cat([outputs["gauss_means"][b], position_list[b]], dim=0)
+                outputs["gauss_opacity"][b] = torch.cat([outputs["gauss_opacity"][b], opacity_list[b]], dim=0)
+                outputs["gauss_scaling"][b] = torch.cat([outputs["gauss_scaling"][b], scaling_list[b]], dim=0)
+                outputs["gauss_rotation"][b] = torch.cat([outputs["gauss_rotation"][b], rotation_list[b]], dim=0)
+                outputs["gauss_features_dc"][b] = torch.cat([outputs["gauss_features_dc"][b], feat_dc_list[b]], dim=0)
+        else:
+            outputs["gauss_means"] = position_list
+            outputs["gauss_opacity"] = opacity_list
+            outputs["gauss_scaling"] = scaling_list
+            outputs["gauss_rotation"] = rotation_list
+            outputs["gauss_features_dc"] = feat_dc_list
+            
         if self.binary_predictor:
             # save binary_voxel and binary_logits
             binary_logits, binary_voxel, rest_binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0), torch.cat(rest_binary_voxel_list, dim=0)
