@@ -185,7 +185,6 @@ note.txt
 *.jpg
 *.gif
 *.out
-*.yaml
 *.json
 *.ply
 *.tar.gz

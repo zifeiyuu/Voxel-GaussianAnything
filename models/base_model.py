@@ -107,10 +107,7 @@ class BaseModel(nn.Module):
             for k in range(B):
                 depth_k = depth[[k * self.cfg.model.gaussians_per_pixel], ...]
                 sparse_depth_k = sparse_depth[k]
-                if ("scale_colmap", 0) in inputs.keys():
-                    scale = inputs[("scale_colmap", 0)][k]
-                else:
-                    scale = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
+                scale = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
                 scales.append(scale)
             scale = torch.tensor(scales, device=depth.device).unsqueeze(dim=1)
             outputs[("depth_scale", 0)] = scale
@@ -123,6 +120,7 @@ class BaseModel(nn.Module):
                 T = outputs[("cam_T_cam", f_i, 0)]
                 T[:, :3, 3] = T[:, :3, 3] * scale
                 outputs[("cam_T_cam", f_i, 0)] = T
+                
 
     
     def render_images(self, inputs, outputs):

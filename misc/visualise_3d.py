@@ -169,12 +169,6 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         opacities = rearrange(outputs["gauss_opacity"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         f_rest = rearrange(outputs["gauss_features_rest"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
-        # means = rearrange(outputs["gauss_means"], "(b v) c n -> (b v) n c", v=gaussians_per_pixel)[1, :, :3]
-        # scales = rearrange(outputs["gauss_scaling"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
-        # rotations = rearrange(outputs["gauss_rotation"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
-        # opacities = rearrange(outputs["gauss_opacity"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
-        # harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
-        # f_rest = rearrange(outputs["gauss_features_rest"], "(b v) c h w -> (b v) (h w) c", v=gaussians_per_pixel)[1]
     else:
         means = outputs["gauss_means"][0]
         scales = outputs["gauss_scaling"][0]

@@ -1,0 +1,14 @@
+img_feature_source: dino
+in_channels: 32
+num_blocks: 3 # 512 -> 128 
+f_maps: 32 
+f_maps_2d: 32
+neck_dense_type: "UNCHANGED"
+neck_bound: [128, 128, 32] # ! useless
+use_attention: false
+gs_enhanced: "original"
+gsplat_upsample: 1
+occ_upsample: 2
+max_scaling: 1
+max_return: 2
+feature_pooling_2d: "max"

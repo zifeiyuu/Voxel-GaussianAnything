@@ -353,7 +353,7 @@ class MoGe_MVEncoder(nn.Module):
         self.backproject_depth = nn.ModuleDict(backproject_depth)
         
     def forward(self, inputs, outputs):
-        frame_ids = self.using_frames
+        frame_ids = [0] # self.using_frames
         for frame_id in frame_ids:
             self.color = inputs["color_aug", frame_id, 0]  
             rgbs = inputs["color_aug", frame_id, 0]  

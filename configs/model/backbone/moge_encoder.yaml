@@ -1,6 +1,6 @@
 name: moge
 
-pts_feat_dim: 32
+pts_feat_dim: 29
 
 moge:
   freeze_encoder: true

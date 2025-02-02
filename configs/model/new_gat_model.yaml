@@ -50,16 +50,16 @@ scale_lambda: 0.01
 depth_bias: -0.1
 xyz_bias: 0.0
 opacity_bias: 0.1
-scale_bias: 0.06
+scale_bias: 0.04
 
 # point parameters
 point_head_scale: 1e-2
 point_head_bias: 0.0
 
 # voxel parameters
-voxel_size: 0.03
+voxel_size: 0.024
 pc_range: [-5.12, -5.12, 0, 5.12, 5.12, 15.36]
-coarse_voxel_size: 0.03
+coarse_voxel_size: 0.08
 voxel_feat_dim: 32
 dim_expand: 4
 

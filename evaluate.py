@@ -139,71 +139,83 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
     spliced_images_list = []
     iou_list = []
     rest_iou_list = []
-    for k in tqdm([i for i in range(len(dataloader.dataset)  // cfg.data_loader.batch_size)], desc="Evaluating"):
-        inputs = next(dataloader_iter)
 
-        with torch.no_grad():
-            if device is not None:
-                to_device(inputs, device)
-            inputs["target_frame_ids"] = all_target_frame_ids
-            outputs = model_model(inputs)        
+    total_samples = len(dataloader.dataset)
+    batch_size = cfg.data_loader.batch_size
+    with tqdm(total=total_samples, desc="Evaluating") as pbar:
+        for k in range(total_samples // batch_size):
+            inputs = next(dataloader_iter)
 
-        if save_vis:
-            seq_name = inputs[("frame_id", 0)][0]
-            out_out_dir = out_dir / seq_name
-            out_out_dir.mkdir(exist_ok=True)
-            out_pred_dir = out_out_dir / "pred"
-            out_pred_dir.mkdir(exist_ok=True)
-            out_gt_dir = out_out_dir / "gt"
-            out_gt_dir.mkdir(exist_ok=True)
-            out_dir_ply = out_out_dir / "ply"
-            out_dir_ply.mkdir(exist_ok=True)
-            out_spliced_dir = out_out_dir / "spliced"
-            out_spliced_dir.mkdir(exist_ok=True)
+            with torch.no_grad():
+                if device is not None:
+                    to_device(inputs, device)
+                inputs["target_frame_ids"] = all_target_frame_ids
+                outputs = model_model(inputs)        
+            
+            for b in range(batch_size):
+                if save_vis:
+                    seq_name = inputs[("frame_id", 0)][b] + f"{b}"
+                    out_out_dir = out_dir / seq_name
+                    out_out_dir.mkdir(exist_ok=True)
+                    out_pred_dir = out_out_dir / "pred"
+                    out_pred_dir.mkdir(exist_ok=True)
+                    out_gt_dir = out_out_dir / "gt"
+                    out_gt_dir.mkdir(exist_ok=True)
+                    out_dir_ply = out_out_dir / "ply"
+                    out_dir_ply.mkdir(exist_ok=True)
+                    out_spliced_dir = out_out_dir / "spliced"
+                    out_spliced_dir.mkdir(exist_ok=True)
 
-        for f_id in score_dict.keys():
-            pred = outputs[('color_gauss', f_id, 0)]
-            gt = inputs[('color', f_id, 0)]  # Output is directly from input
-            # Should work in for B>1, however, be careful of reduction
-            out = evaluator(pred, gt)
-            if save_vis:
-                save_ply(outputs, out_dir_ply / f"{f_id}.ply", gaussians_per_pixel=cfg.model.gaussians_per_pixel, name=cfg.model.name)
+                for f_id in score_dict.keys():
+                    pred = outputs[('color_gauss', f_id, 0)][b]
+                    gt = inputs[('color', f_id, 0)][b]
+                    if save_vis:
+                        if f_id == 0:
+                            save_ply(outputs, out_dir_ply / f"{f_id}.ply", gaussians_per_pixel=cfg.model.gaussians_per_pixel, name=cfg.model.name)
 
-                pred = pred[0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
-                gt = gt[0].clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
+                        pred = pred.clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
+                        gt = gt.clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
+                        
+                        # Save individual images
+                        plt.imsave(str(out_pred_dir / f"{f_id:03}.png"), pred)
+                        plt.imsave(str(out_gt_dir / f"{f_id:03}.png"), gt)
+
+                        # Concatenate images horizontally (splicing)
+                        spliced_image = np.concatenate((gt, pred), axis=1)
+                        spliced_image_uint8 = (spliced_image * 255).astype(np.uint8)
+                        spliced_image_path = str(out_spliced_dir / f"{f_id:03}.png")
+                        plt.imsave(spliced_image_path, spliced_image_uint8)
+
+                        spliced_images_list.append(spliced_image_uint8)
+
+
+                if spliced_images_list and save_vis:
+                    total_image = np.vstack(spliced_images_list)  
+                    total_image_path = str(out_spliced_dir / f"inAll.png") 
+                    plt.imsave(total_image_path, total_image)
+                    spliced_images_list = []
+
+            for f_id in score_dict.keys():
+                pred = outputs[('color_gauss', f_id, 0)]
+                gt = inputs[('color', f_id, 0)]  # Output is directly from input
+                # Should work in for B>1, however, be careful of reduction
+                out = evaluator(pred, gt)
+                for metric_name, v in out.items():
+                    score_dict[f_id][metric_name].append(v)
+
+            if cfg.model.binary_predictor:
+                # calculate iou 
+                binary_logits, binary_voxels, rest_binary_voxels = outputs['binary_logits'], outputs['binary_voxel'], outputs["rest_binary_voxel"]
+                rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
+                    (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
+                ).sum()
+                rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
+                    (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
+                ).sum()
+                iou_list.append(rec_iou)
+                rest_iou_list.append(rest_iou)
                 
-                # Save individual images
-                plt.imsave(str(out_pred_dir / f"{f_id:03}.png"), pred)
-                plt.imsave(str(out_gt_dir / f"{f_id:03}.png"), gt)
-
-                # Concatenate images horizontally (splicing)
-                spliced_image = np.concatenate((gt, pred), axis=1)
-                spliced_image_uint8 = (spliced_image * 255).astype(np.uint8)
-                spliced_image_path = str(out_spliced_dir / f"{f_id:03}.png")
-                plt.imsave(spliced_image_path, spliced_image_uint8)
-
-                spliced_images_list.append(spliced_image_uint8)
-
-            for metric_name, v in out.items():
-                score_dict[f_id][metric_name].append(v)
-
-        if spliced_images_list and save_vis:
-            total_image = np.vstack(spliced_images_list)  
-            total_image_path = str(out_spliced_dir / f"inAll.png") 
-            plt.imsave(total_image_path, total_image)
-            spliced_images_list = []
-
-    if cfg.model.binary_predictor:
-        # calculate iou 
-        binary_logits, binary_voxels, rest_binary_voxels = outputs['binary_logits'], outputs['binary_voxel'], outputs["rest_binary_voxel"]
-        rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
-            (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
-        ).sum()
-        rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
-            (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
-        ).sum()
-        iou_list.append(rec_iou)
-        rest_iou_list.append(rest_iou)
+            pbar.update(batch_size)
 
     metric_names = ["psnr", "ssim", "lpips"]
     score_dict_by_name = {}
@@ -239,6 +251,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
         txt_file.write(json_content)
         txt_file.write("\n" + str(mean_iou) + "\n")
         txt_file.write("\n" + str(mean_rest_iou) + "\n")
+
     return score_dict_by_name
 
 @hydra.main(

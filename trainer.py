@@ -66,14 +66,11 @@ class Trainer(nn.Module):
 
     def forward(self, inputs):
         outputs = self.model.forward(inputs)
-        if self.cfg.add_mask:
-            mask = self.calculate_mask(inputs)
-        else:
-            mask = None
+
         if self.pretrain:
             losses = self.compute_pretraining_loss(inputs, outputs)
         else:
-            losses = self.compute_losses(inputs, outputs, mask)
+            losses = self.compute_losses(inputs, outputs)
         self.get_grad_norm(outputs)
         return losses, outputs
     
@@ -244,73 +241,58 @@ class Trainer(nn.Module):
         return losses
 
     
-    def compute_losses(self, inputs, outputs, mask):
+    def compute_losses(self, inputs, outputs):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         cfg = self.cfg
+        B = cfg.data_loader.batch_size
         losses = {}
         total_loss = 0.0
 
-        if cfg.model.gaussian_rendering:
+        if self.cfg.loss.bce.weight > 0 and cfg.model.binary_predictor:
+            bce_loss, rec_iou,rest_iou = self.compute_bce_loss(outputs)
+            losses["loss/bce_loss"] = bce_loss
+            losses["loss/rec_iou"] = rec_iou
+            losses["loss/rest_iou"] = rest_iou
+            total_loss += self.cfg.loss.bce.weight * bce_loss
+
+        # regularize cd
+        if cfg.loss.soft_cd.weight > 0:
+            cd_loss = self.compute_cd_loss(inputs, outputs)
+            losses["loss/cd_loss"] = cd_loss
+            total_loss += cfg.loss.soft_cd.weight * cd_loss
+
+        if self.cfg.model.gaussian_rendering:
             # regularize too big gaussians
             if (big_g_lmbd := cfg.loss.gauss_max_scale.weight) > 0:
-                scaling = outputs["gauss_scaling"]
-                big_gaussians = torch.where(scaling > cfg.loss.gauss_max_scale.thresh)
-                if len(big_gaussians[0]) > 0:
-                    big_gauss_reg_loss = torch.mean(scaling[big_gaussians])
-                else:
-                    big_gauss_reg_loss = 0
-                losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss
-                total_loss += big_g_lmbd * big_gauss_reg_loss
+                big_gauss_reg_loss = 0
+                for b in range(B):
+                    scaling = outputs["gauss_scaling"][b]
+                    big_gaussians = torch.where(scaling > cfg.loss.gauss_max_scale.thresh)
+                    if len(big_gaussians[0]) > 0:
+                        big_gauss_reg_loss += torch.mean(scaling[big_gaussians])
+
+                losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss / B
+                total_loss += big_g_lmbd * big_gauss_reg_loss / B
 
             # regularize too small gaussians
             if (small_g_lmbd := cfg.loss.gauss_min_scale.weight) > 0:
-                scaling = outputs["gauss_scaling"]
+                small_gauss_reg_loss = 0
+                for b in range(B):
+                    scaling = outputs["gauss_scaling"][b]
+                    small_gaussians = torch.where(scaling < cfg.loss.gauss_min_scale.single_thresh)
+                    if len(small_gaussians[0]) > 0:
+                        small_gauss_reg_loss += torch.mean(scaling[small_gaussians])
 
-                small_gaussians = torch.where(scaling < cfg.loss.gauss_min_scale.single_thresh)
-                if len(small_gaussians[0]) > 0:
-                    small_gauss_reg_loss = torch.mean(scaling[small_gaussians])
-                else:
-                    small_gauss_reg_loss = 0
-                losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss
-                total_loss += small_g_lmbd * small_gauss_reg_loss
-
-            # regularize too big offset
-            if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:
-                offset = outputs["gauss_offset"]
-                big_offset = torch.where(offset**2 > cfg.loss.gauss_offset.thresh**2)
-                if len(big_offset[0]) > 0:
-                    big_offset_reg_loss = torch.mean(offset[big_offset]**2)
-                else:
-                    big_offset_reg_loss = 0.0
-                losses["loss/gauss_offset_reg"] = big_offset_reg_loss
-                total_loss += offs_lmbd * big_offset_reg_loss
-                
-            # regularize cd
-            if cfg.loss.soft_cd.weight > 0:
-                cd_loss = self.compute_cd_loss(inputs, outputs)
-                losses["loss/cd_loss"] = cd_loss
-                total_loss += cfg.loss.soft_cd.weight * cd_loss
-                
-            # regularize binary voxel
-            if cfg.loss.bce.weight > 0:
-                bce_loss, rec_iou = self.compute_bce_loss(outputs)
-                losses["loss/bce_loss"] = bce_loss
-                losses["loss/rec_iou"] = rec_iou
-                losses["padding_number"] = outputs["padding_number"]
-                total_loss += cfg.loss.bce.weight * bce_loss
-
-            if cfg.loss.gauss_depth.weight > 0:
-                depth_loss = self.compute_depth_loss(inputs, outputs)
-                losses["loss/depth_loss"] = depth_loss
-                total_loss += cfg.loss.gauss_depth.weight * depth_loss
+                losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss / B
+                total_loss += small_g_lmbd * small_gauss_reg_loss / B
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
                 frame_ids = self.model.module.all_frame_ids(inputs)[:4]
-
             else:
                 frame_ids = self.model.all_frame_ids(inputs)[:4]
+
             rec_loss = 0
             for frame_id in frame_ids:
                 # compute gaussian reconstruction loss
@@ -318,6 +300,7 @@ class Trainer(nn.Module):
                 target = target[:,:,cfg.dataset.pad_border_aug:target.shape[2]-cfg.dataset.pad_border_aug,
                                 cfg.dataset.pad_border_aug:target.shape[3]-cfg.dataset.pad_border_aug,]
                 pred = outputs[("color_gauss", frame_id, 0)]
+
                 rec_loss += self.compute_reconstruction_loss(pred, target, losses)
             rec_loss /= len(frame_ids)
             losses["loss/rec"] = rec_loss

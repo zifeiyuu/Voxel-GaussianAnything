@@ -86,5 +86,11 @@ class LinearHead(nn.Module):
         if self.predict_offset:
             integrated_gauss_offset = torch.cat(integrated_gauss_offset, dim=-1)
             out["gauss_offset"] = integrated_gauss_offset
+            
+        for key in out.keys():
+            out[key] = out[key].permute(0, 1, 3, 2) 
+            out[key] = out[key].view(out[key].shape[0], -1, out[key].shape[3])
+            if key == "gauss_features_dc":
+                out[key] = out[key].unsqueeze(2)
 
         return out
