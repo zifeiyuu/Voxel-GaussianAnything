@@ -6,7 +6,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "unet3d_colordebug" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
+  exp_name: "unet3d_nodirect" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
   file: "gat_config.yaml"
 
 data_loader:

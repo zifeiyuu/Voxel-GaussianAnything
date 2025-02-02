@@ -357,7 +357,7 @@ class Trainer(nn.Module):
 
         if not cfg.train.pretrain:
             if cfg.model.gaussian_rendering:
-                if self.cfg.model.predict_offset:
+                if self.cfg.model.predict_offset and self.cfg.model.direct_gaussian:
                     offset_mag = torch.linalg.vector_norm(outputs["gauss_offset"], dim=1)
                     mean_offset = offset_mag.mean()
                     logger.add_scalar(f"{mode}/gauss/offset/mean", mean_offset.item(), self.step)
