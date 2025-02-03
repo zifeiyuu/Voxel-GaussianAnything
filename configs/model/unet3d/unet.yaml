@@ -1,3 +1,6 @@
+lifter_params:
+  img_in_dim: 32
+  voxel_out_dim: 32
 img_feature_source: dino
 in_channels: 32
 num_blocks: 3 # 512 -> 128 

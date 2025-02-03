@@ -6,11 +6,11 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "unet3d_nodirect" # moge_multiscale_padding_lpips vfe_c2f_voxpred_recon_ori
+  exp_name: "unet3d+binary" 
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 4
+  batch_size: 1
   num_workers: 16
 
 train:
@@ -33,7 +33,7 @@ optimiser:
   num_epochs: 100
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 1
+  accumulation_steps: 4
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0

@@ -252,7 +252,7 @@ class AttentionBlock(nn.Module):
     
 
 class Modified3DUnet(nn.Module):
-    def __init__(self,
+    def __init__(self, lifter_params, 
                  in_channels, num_blocks, f_maps=64, order='gcs', num_groups=8,
                  neck_dense_type="UNCHANGED", neck_bound=4, 
                  with_render_branch=True,
@@ -272,6 +272,7 @@ class Modified3DUnet(nn.Module):
                  max_scaling=0.0,
                  **kwargs):
         super().__init__()
+        self.lifter = Lifter(**lifter_params)
 
         n_features = [in_channels] + [f_maps * 2 ** k for k in range(num_blocks)]
         self.encoders = nn.ModuleList()
@@ -741,8 +742,9 @@ class Modified3DUnet(nn.Module):
 
         return abs_pos.float(), scaling, rotation, opacity, color.unsqueeze(1) # for rasterizer
     
-    def forward(self, coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics, use_point=False):
+    def forward(self, coors, padding_coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics):
         # coors list[N, 3]
+        # padding coors list[N2, 3]
         # voxel_sizes [x, x, x]
         # origins [x, x, x]
         # voxel_features list[N, C]        
@@ -752,18 +754,25 @@ class Modified3DUnet(nn.Module):
         
         batch_size = intrinsics.shape[0]
 
-        if not use_point:
-            x_grid = fvdb.gridbatch_from_ijk(
-                fvdb.JaggedTensor(coors),  
+        if padding_coors:
+            padding_grid = fvdb.gridbatch_from_ijk(
+                fvdb.JaggedTensor(padding_coors),  
                 voxel_sizes=[voxel_sizes for _ in range(batch_size)],
                 origins=[origins for _ in range(batch_size)]
             )
-        else:
-            x_grid = fvdb.gridbatch_from_points(
-                fvdb.JaggedTensor(coors),  
-                voxel_sizes=[voxel_sizes for _ in range(batch_size)],
-                origins=[origins for _ in range(batch_size)]
-            )
+
+            padding_voxel_features = self.lifter(padding_grid, camera_pose, intrinsics, img_features)
+            del padding_grid
+
+            for b in range(batch_size):
+                coors[b] = torch.cat([coors[b], padding_coors[b]], dim=0)
+                voxel_features[b] = torch.cat([voxel_features[b], padding_voxel_features[b]], dim=0)
+
+        x_grid = fvdb.gridbatch_from_ijk(
+            fvdb.JaggedTensor(coors),  
+            voxel_sizes=[voxel_sizes for _ in range(batch_size)],
+            origins=[origins for _ in range(batch_size)]
+        )
         allbatch_voxel_features = torch.cat(voxel_features, dim=0)
 
         x = fvnn.VDBTensor(x_grid, x_grid.jagged_like(allbatch_voxel_features))
@@ -785,9 +794,8 @@ class Modified3DUnet(nn.Module):
 
 
 class Lifter(nn.Module):
-    def __init__(self, img_feature_source, img_in_dim, voxel_out_dim):
+    def __init__(self, img_in_dim, voxel_out_dim):
         super().__init__()
-        self.img_feature_source = img_feature_source
         self.mix_fc = nn.Linear(img_in_dim, voxel_out_dim)
 
     def create_rays_from_intrinsic_torch_batch(self, pose_matric, intrinsic):
@@ -845,6 +853,18 @@ class Lifter(nn.Module):
             intrinsics[..., [1,3,5]] = intrinsics[..., [1,3,5]] / downsample_h
             intrinsics[..., [0,2,4]] = intrinsics[..., [0,2,4]] / downsample_w
 
+        # Image padding to expand coverage
+        padding_size = 28 
+        B, N, C, H, W = img_features.shape
+        img_features = img_features.view(B * N, C, H, W)  # Flatten B and N into one batch
+        img_features = F.pad(img_features, (padding_size, padding_size, padding_size, padding_size), mode="reflect")
+        img_features = img_features.view(B, N, C, img_features.shape[-2], img_features.shape[-1])
+        B, N, C, H, W = img_features.shape
+        intrinsics[..., 2] += padding_size  # cx (center x)
+        intrinsics[..., 3] += padding_size  # cy (center y)
+        intrinsics[..., 4] = W 
+        intrinsics[..., 5] = H
+
         for bidx in range(grid.grid_count):
             cur_grid = grid[bidx]
             cur_pose = camera_pose[bidx] # N, 4, 4
@@ -879,11 +899,9 @@ class Lifter(nn.Module):
 
             voxel_features.append(out_voxel_features)
 
-        voxel_features = torch.cat(voxel_features, dim=0)
-
         return voxel_features
 
     def forward(self, grid, camera_pose, intrinsics, img_features):
         voxel_features = self.build_ray_casting_feature(grid, camera_pose, intrinsics, img_features)
-        voxel_features = self.mix_fc(voxel_features)
+        voxel_features = [self.mix_fc(feature) for feature in voxel_features]
         return voxel_features

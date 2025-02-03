@@ -139,7 +139,7 @@ class Trainer(nn.Module):
         recon_pts = outputs["gauss_means"]
         cd, chamferDistance = 0.0, ChamferDistance()
         if outputs["error"]:
-            print("error")
+            print("cd error")
             return cd
         for bs, scale in enumerate(outputs[('depth_scale', 0)]):
             scene_recon_pts = recon_pts[bs]
@@ -151,9 +151,10 @@ class Trainer(nn.Module):
         return cd
     
     def compute_bce_loss(self, outputs):
+        bce_loss, rec_iou, rest_iou = 0.0, 0.0, 0.0
         if outputs["error"]:
-            print("error")
-            return 0.0
+            print("bce error")
+            return bce_loss, rec_iou, rest_iou
         binary_logits, binary_voxels, rest_binary_voxels = outputs['binary_logits'], outputs['binary_voxel'], outputs["rest_binary_voxel"]
         
         bce_loss = F.binary_cross_entropy_with_logits(binary_logits, binary_voxels, reduction="mean")
