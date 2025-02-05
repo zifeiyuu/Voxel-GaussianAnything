@@ -4,8 +4,8 @@ data_path: /scratch/shared/beegfs/eldar/data/nyuv2_raw
 colmap_path: /work/eldar/data/datasets/nyuv2_colmap
 split_path: splits/nyuv2/val_files.txt
 
-height: 256
-width: 384
+height: 224
+width: 336
 
 znear: 0.01
 zfar: 100.0
@@ -17,5 +17,5 @@ skip_bad_shape: false
 crop_principal_point: false
 
 subset: -1
-pad_border_aug: 32
+pad_border_aug: 0
 scale_pose_by_depth: true

@@ -30,6 +30,7 @@ class Trainer(nn.Module):
         self.pretrain = pretrain
         if cfg.model.name == "unidepth":
             self.model = GaussianPredictor(cfg)
+            self.model._is_train = True
         elif cfg.model.name == "gat_voxsplat":
             from models.gat_model import GATModel
             self.model = GATModel(cfg)
@@ -66,11 +67,13 @@ class Trainer(nn.Module):
 
     def forward(self, inputs):
         outputs = self.model.forward(inputs)
-
-        if self.pretrain:
-            losses = self.compute_pretraining_loss(inputs, outputs)
+        if self.cfg.task_name == "flash3d":
+            losses = self.compute_flash3d_losses(inputs, outputs)
         else:
-            losses = self.compute_losses(inputs, outputs)
+            if self.pretrain:
+                losses = self.compute_pretraining_loss(inputs, outputs)
+            else:
+                losses = self.compute_losses(inputs, outputs)
         self.get_grad_norm(outputs)
         return losses, outputs
     
@@ -257,11 +260,11 @@ class Trainer(nn.Module):
             losses["loss/rest_iou"] = rest_iou
             total_loss += self.cfg.loss.bce.weight * bce_loss
 
-        # regularize cd
-        if cfg.loss.soft_cd.weight > 0:
-            cd_loss = self.compute_cd_loss(inputs, outputs)
-            losses["loss/cd_loss"] = cd_loss
-            total_loss += cfg.loss.soft_cd.weight * cd_loss
+        # # regularize cd
+        # if cfg.loss.soft_cd.weight > 0:
+        #     cd_loss = self.compute_cd_loss(inputs, outputs)
+        #     losses["loss/cd_loss"] = cd_loss
+        #     total_loss += cfg.loss.soft_cd.weight * cd_loss
 
         if self.cfg.model.gaussian_rendering:
             # regularize too big gaussians
@@ -310,6 +313,57 @@ class Trainer(nn.Module):
         losses["loss/total"] = total_loss
         return losses
     
+    def compute_flash3d_losses(self, inputs, outputs):
+        """Compute the reprojection and smoothness losses for a minibatch
+        """
+        cfg = self.cfg
+        losses = {}
+        total_loss = 0.0
+
+        if cfg.model.gaussian_rendering:
+            # regularize too big or too small gaussians
+            if (big_g_lmbd := cfg.loss.gauss_scale.weight) > 0:
+                scaling = outputs["gauss_scaling"]
+                big_gaussians = torch.where(scaling > cfg.loss.gauss_scale.thresh)
+                if len(big_gaussians[0]) > 0:
+                    big_gauss_reg_loss = torch.mean(scaling[big_gaussians])
+                else:
+                    big_gauss_reg_loss = 0
+                losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss
+                total_loss += big_g_lmbd * big_gauss_reg_loss
+            
+            # regularize too big offset
+            if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:
+                offset = outputs["gauss_offset"]
+                big_offset = torch.where(offset**2 > cfg.loss.gauss_offset.thresh**2)
+                if len(big_offset[0]) > 0:
+                    big_offset_reg_loss = torch.mean(offset[big_offset]**2)
+                else:
+                    big_offset_reg_loss = 0.0
+                losses["loss/gauss_offset_reg"] = big_offset_reg_loss
+                total_loss += offs_lmbd * big_offset_reg_loss
+
+            # reconstruction loss
+            if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                frame_ids = self.model.module.all_frame_ids(inputs)[:4]
+            else:
+                frame_ids = self.model.all_frame_ids(inputs)[:4]
+                
+            rec_loss = 0
+            for frame_id in frame_ids:
+                # compute gaussian reconstruction loss
+                target = inputs[("color_aug", frame_id, 0)]
+                target = target[:,:,cfg.dataset.pad_border_aug:target.shape[2]-cfg.dataset.pad_border_aug,
+                                cfg.dataset.pad_border_aug:target.shape[3]-cfg.dataset.pad_border_aug,]
+                pred = outputs[("color_gauss", frame_id, 0)]
+                rec_loss += self.compute_reconstruction_loss(pred, target, losses)
+            rec_loss /= len(frame_ids)
+            losses["loss/rec"] = rec_loss
+            total_loss += rec_loss
+
+        losses["loss/total"] = total_loss
+        return losses
+
     def get_grad_norm(self, outputs):
         # Compute gradient norm
         grad_norm = 0.0

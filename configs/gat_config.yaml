@@ -1,3 +1,4 @@
+task_name: gat
 defaults:
   - _self_
   - hydra: defaults
@@ -6,7 +7,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "unet3d+binary" 
+  exp_name: "debugggg" 
   file: "gat_config.yaml"
 
 data_loader:
@@ -33,7 +34,7 @@ optimiser:
   num_epochs: 100
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 4
+  accumulation_steps: 1
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0
@@ -48,7 +49,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 2000
+  log_frequency: 20
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5

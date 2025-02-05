@@ -171,7 +171,7 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
                     gt = inputs[('color', f_id, 0)][b]
                     if save_vis:
                         if f_id == 0:
-                            save_ply(outputs, out_dir_ply / f"{f_id}.ply", gaussians_per_pixel=cfg.model.gaussians_per_pixel, name=cfg.model.name)
+                            save_ply(outputs, out_dir_ply, gaussians_per_pixel=cfg.model.gaussians_per_pixel, name=cfg.model.name, batch=b)
 
                         pred = pred.clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()
                         gt = gt.clip(0.0, 1.0).permute(1, 2, 0).detach().cpu().numpy()

@@ -4,7 +4,7 @@ from einops import rearrange
 from collections import OrderedDict
 
 from models.encoder.layers import *
-from models.decoder.gaussian_decoder import get_splits_and_inits, GaussianDecoder
+from models.decoder.flash3d_gaussian_decoder import get_splits_and_inits, GaussianDecoder
 
 from IPython import embed
 class ResnetDecoder(nn.Module):
@@ -53,7 +53,7 @@ class ResnetDecoder(nn.Module):
 
     def forward(self, input_features):
         x = input_features[-1]
-        for i in range(4, -1, -1):
+        for i in range(4, -1, -1):          
             x = self.convs[("upconv", i, 0)](x)
             x = [upsample(x, mode=self.cfg.model.backbone.upsample_mode)]
             if self.use_skips and i > 0:

@@ -101,48 +101,6 @@ def export_ply(
     opacities: Float[Tensor, "gaussian"],
     path: Path,
 ):
-    # Shift the scene so that the median Gaussian is at the origin.
-    # means = means - means.median(dim=0).values
-
-    # # Rescale the scene so that most Gaussians are within range [-1, 1].
-    # scale_factor = means.abs().quantile(0.95, dim=0).max()
-    # means = means / scale_factor
-    # scales = scales / scale_factor
-
-    # # Define a rotation that makes +Z be the world up vector.
-    # rotation = [
-    #     [0, 0, 1],
-    #     [-1, 0, 0],
-    #     [0, -1, 0],
-    # ]
-    # rotation = torch.tensor(rotation, dtype=torch.float32, device=means.device)
-
-    # # The Polycam viewer seems to start at a 45 degree angle. Since we want to be
-    # # looking directly at the object, we compose a 45 degree rotation onto the above
-    # # rotation.
-    # adjustment = torch.tensor(
-    #     R.from_rotvec([0, 0, -45], True).as_matrix(),
-    #     dtype=torch.float32,
-    #     device=means.device,
-    # )
-    # rotation = adjustment @ rotation
-
-    # # We also want to see the scene in camera space (as the default view). We therefore
-    # # compose the w2c rotation onto the above rotation.
-    # # rotation = rotation @ extrinsics[:3, :3].inverse()
-
-    # # Apply the rotation to the means (Gaussian positions).
-    # means = einsum(rotation, means, "i j, ... j -> ... i")
-
-    # # Apply the rotation to the Gaussian rotations.
-    # rotations = R.from_quat(rotations.detach().cpu().numpy()).as_matrix()
-    # rotations = rotation.detach().cpu().numpy() @ rotations
-    # rotations = R.from_matrix(rotations).as_quat()
-    # x, y, z, w = rearrange(rotations, "g xyzw -> xyzw g")
-    # rotations = np.stack((w, x, y, z), axis=-1)
-
-    # Since our axes are swizzled for the spherical harmonics, we only export the DC
-    # band.
     f_dc = harmonics
 
     dtype_full = [(attribute, "f4") for attribute in construct_list_of_attributes(0)]
@@ -161,7 +119,7 @@ def export_ply(
     PlyData([PlyElement.describe(elements, "vertex")]).write(path)
 
 
-def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
+def save_ply(outputs, path, gaussians_per_pixel=3, name=None, batch=0):
     if name == "unidepth":  
         means = rearrange(outputs["gauss_means"], "(b v) c n -> b (v n) c", v=gaussians_per_pixel)[0, :, :3]
         scales = rearrange(outputs["gauss_scaling"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
@@ -170,11 +128,11 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         harmonics = rearrange(outputs["gauss_features_dc"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
         f_rest = rearrange(outputs["gauss_features_rest"], "(b v) c h w -> b (v h w) c", v=gaussians_per_pixel)[0]
     else:
-        means = outputs["gauss_means"][0]
-        scales = outputs["gauss_scaling"][0]
-        rotations = outputs["gauss_rotation"][0]
-        opacities = outputs["gauss_opacity"][0]
-        harmonics = outputs["gauss_features_dc"][0].squeeze(1)
+        means = outputs["gauss_means"][batch]
+        scales = outputs["gauss_scaling"][batch]
+        rotations = outputs["gauss_rotation"][batch]
+        opacities = outputs["gauss_opacity"][batch]
+        harmonics = outputs["gauss_features_dc"][batch].squeeze(1)
 
     export_ply(
         means,
@@ -182,9 +140,36 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None):
         rotations,
         harmonics,
         opacities,
-        path
+        path / "predicted.ply"
     )
 
+    if name != "unidepth" and outputs["gt_points"]:
+        means2 = outputs["gt_points"][batch]
+        scales2 = torch.ones_like(means2)
+        rotations2 = torch.ones((means2.shape[0], 4), dtype=means2.dtype, device=means2.device)
+        opacities2 = torch.ones((means2.shape[0], 1), dtype=means2.dtype, device=means2.device)
+        harmonics2 = torch.ones((means2.shape[0], 3), dtype=means2.dtype, device=means2.device) 
+        export_ply(
+            means2,
+            scales2,
+            rotations2,
+            harmonics2,
+            opacities2,
+            path / "GT.ply"
+        )
+        means3 = torch.cat([means, means2], dim=0)
+        scales3 = torch.cat([scales, scales2], dim=0)
+        rotations3 = torch.cat([rotations, rotations2], dim=0)
+        opacities3 = torch.cat([opacities, opacities2], dim=0)
+        harmonics3 = torch.cat([harmonics, harmonics2], dim=0)
+        export_ply(
+            means3,
+            scales3,
+            rotations3,
+            harmonics3,
+            opacities3,
+            path / "combine.ply"
+        )
 
 def storePly(path, xyz, rgb):
     # Define the dtype for the structured array

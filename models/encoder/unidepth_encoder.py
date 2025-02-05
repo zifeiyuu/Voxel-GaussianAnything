@@ -85,6 +85,7 @@ class UniDepthExtended(nn.Module):
             input = torch.cat([inputs["color_aug", 0, 0], depth_outs["depth"] / 20.0], dim=1)
         else:
             input = inputs["color_aug", 0, 0]
+
         encoded_features = self.encoder(input)
         # predict multiple gaussian depths
         if self.cfg.model.gaussians_per_pixel > 1:

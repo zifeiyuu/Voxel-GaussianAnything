@@ -1,8 +1,9 @@
+task_name: flash3d
 defaults:
   - _self_
   - hydra: defaults
   - model: gaussian
-  - dataset: pixelsplat # pixelsplat scannetpp
+  - dataset: scannetpp # pixelsplat scannetpp
   - loss: [reconstruction, regularization]  ## originally only [reconstruction] loss
 
 config:
@@ -10,14 +11,18 @@ config:
   file: "config.yaml"
 
 data_loader:
-  batch_size: 1
+  batch_size: 4
   num_workers: 16
 
 train:
+  pretrain: false
+  pretrain_warmup: -1
   logging: false 
   mixed_precision: 32-true #32-true, 16-mixed
   num_gpus: 1 #[1, 2, 3]
-  load_weights_folder:
+  load_weights_folder: false
+  load_pretrain: false
+  freeze_pretrain: false
   ema:
     use: true
     update_every: 10
@@ -26,15 +31,17 @@ train:
 
 optimiser:
   learning_rate: 1e-4 #1e-4
-  num_epochs: 1
+  num_epochs: 20
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-
-  mode: none
-  num_warmup_steps: 8000
-  warmup_ratio: 2.0
-  max_training_steps: 30000
-  min_lr_ratio: 0.3
+  accumulation_steps: 1
+  mode: cosine
+  num_warmup_steps: 0
+  warmup_ratio: 1.0
+  max_training_steps: 200000
+  min_lr_ratio: 0.1
+  grad_clip: false
+  max_norm: 1
 
 run:
   resume_ckpt: null
@@ -42,8 +49,8 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 250
-  save_frequency: 1000
+  log_frequency: 5000
+  save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5
 
