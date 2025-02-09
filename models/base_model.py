@@ -66,6 +66,7 @@ class BaseModel(nn.Module):
     def process_gt_poses(self, inputs, outputs, pretrain=False):
         cfg = self.cfg
         keyframe = 0
+
         for f_i in self.target_frame_ids(inputs):
             if ("T_c2w", f_i) not in inputs:
                 continue
@@ -92,34 +93,33 @@ class BaseModel(nn.Module):
         
         if cfg.dataset.scale_pose_by_depth:
             B = cfg.data_loader.batch_size
-            if pretrain:
-                depth_padded = torch.stack(inputs[('depth_sparse', 0)]).unsqueeze(1).detach()
-            else:
-                depth_padded = outputs[("depth_pred", 0)].detach()
-            
-            # only use the depth in the unpadded image for scale estimation
-            depth = depth_padded[:, :, 
-                                 self.cfg.dataset.pad_border_aug:depth_padded.shape[2]-self.cfg.dataset.pad_border_aug,
-                                 self.cfg.dataset.pad_border_aug:depth_padded.shape[3]-self.cfg.dataset.pad_border_aug]
-            sparse_depth = inputs[("depth_sparse", 0)]
-            
-            scales = []
-            for k in range(B):
-                depth_k = depth[[k * self.cfg.model.gaussians_per_pixel], ...]
-                sparse_depth_k = sparse_depth[k]
-                scale = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
-                scales.append(scale)
-            scale = torch.tensor(scales, device=depth.device).unsqueeze(dim=1)
-            outputs[("depth_scale", 0)] = scale
+            for f_i in self.target_frame_ids(inputs) + [0]:
+                depth_padded = outputs[("depth_pred", f_i)].detach()
+                
+                # only use the depth in the unpadded image for scale estimation
+                depth = depth_padded[:, :, 
+                                    self.cfg.dataset.pad_border_aug:depth_padded.shape[2]-self.cfg.dataset.pad_border_aug,
+                                    self.cfg.dataset.pad_border_aug:depth_padded.shape[3]-self.cfg.dataset.pad_border_aug]
+                sparse_depth = inputs[("depth_sparse", f_i)]
+                
+                scales = []
+                for k in range(B):
+                    depth_k = depth[[k * self.cfg.model.gaussians_per_pixel], ...]
+                    sparse_depth_k = sparse_depth[k]
+                    scale = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
+                    scales.append(scale)
+                scale = torch.tensor(scales, device=depth.device).unsqueeze(dim=1)
+                outputs[("depth_scale", f_i)] = scale
 
-            for f_i in self.target_frame_ids(inputs):
-                T = outputs[("cam_T_cam", 0, f_i)]
-                scale = scale.to(T.device)
-                T[:, :3, 3] = T[:, :3, 3] * scale
-                outputs[("cam_T_cam", 0, f_i)] = T
-                T = outputs[("cam_T_cam", f_i, 0)]
-                T[:, :3, 3] = T[:, :3, 3] * scale
-                outputs[("cam_T_cam", f_i, 0)] = T
+            # for f_i in self.target_frame_ids(inputs):
+                if f_i != 0:
+                    T = outputs[("cam_T_cam", 0, f_i)]
+                    scale = scale.to(T.device)
+                    T[:, :3, 3] = T[:, :3, 3] * scale
+                    outputs[("cam_T_cam", 0, f_i)] = T
+                    T = outputs[("cam_T_cam", f_i, 0)]
+                    T[:, :3, 3] = T[:, :3, 3] * scale
+                    outputs[("cam_T_cam", f_i, 0)] = T
                 
 
     

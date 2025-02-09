@@ -13,7 +13,7 @@ from torchmetrics.image import LearnedPerceptualImagePatchSimilarity
 from misc.depth import normalize_depth_for_display, depthmap_to_camera_coordinates_torch
 from misc.util import sec_to_hm_str
 from misc.visualise_3d import storePly
-from chamferdist import ChamferDistance
+# from chamferdist import ChamferDistance
 
 from models.encoder.layers import SSIM
 from evaluate import evaluate, get_model_instance
@@ -159,14 +159,15 @@ class Trainer(nn.Module):
             print("bce error")
             return bce_loss, rec_iou, rest_iou
         binary_logits, binary_voxels, rest_binary_voxels = outputs['binary_logits'], outputs['binary_voxel'], outputs["rest_binary_voxel"]
-        
+        # breakpoint()
         bce_loss = F.binary_cross_entropy_with_logits(binary_logits, binary_voxels, reduction="mean")
         rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
             (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
         ).sum()
-        rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
-            (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
-        ).sum()
+        # rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
+        #     (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
+        # ).sum()
+        rest_iou = 0
         return bce_loss, rec_iou, rest_iou
     
     def compute_feature_loss(self, outputs):

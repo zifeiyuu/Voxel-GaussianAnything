@@ -279,7 +279,7 @@ class DiT(nn.Module):
         x_out = self.final_layer(x)              # (N, T, patch_size ** 2 * out_channels)
         x_out = self.unpatchify(x_out)                   # (N, out_channels, H, W)
 
-        return x_out, None
+        return x_out
     
     
 class VoxPredictor(nn.Module):
@@ -321,9 +321,9 @@ class VoxPredictor(nn.Module):
 
         voxel_feature, binary_voxel = self.pts_middle_encoder(vfe_feat, coor, 1)
         
-        pred_binary_logits, pred_feat = self.dit_transformer(voxel_feature)
+        pred_binary_logits = self.dit_transformer(voxel_feature)
         
-        return pred_binary_logits, binary_voxel, pred_feat
+        return pred_binary_logits, binary_voxel
         
         
     def get_parameter_groups(self):

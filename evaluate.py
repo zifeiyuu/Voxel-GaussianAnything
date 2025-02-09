@@ -209,11 +209,11 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
                 rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
                     (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
                 ).sum()
-                rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
-                    (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
-                ).sum()
+                # rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
+                #     (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
+                # ).sum()
                 iou_list.append(rec_iou)
-                rest_iou_list.append(rest_iou)
+                rest_iou_list.append(rec_iou)
                 
             pbar.update(batch_size)
 
