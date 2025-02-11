@@ -1,27 +1,25 @@
 # @package _global_
 config:
-  exp_name: debug
+  exp_name: only_unet
 
 defaults:
-  - override /dataset: pixelsplat
-  - override /model: gat_model
+  - override /dataset: arkitscenes
+  - override /model: new_gat_model 
   - override /loss: [regularization, reconstruction]
 
 optimiser:
   scheduler_lambda_step_size: 500000
 
 train:
-  scale_pose_by_depth: false
+  scale_pose_by_depth: true
   use_gt_poses: true
 
 model:
-  name: gat_model
   gauss_novel_frames: [-1, 1, 2]
   renderer_w_pose: true
-  scale_with_depth: false
-  opacity_scale: 1.0
-  depth_scale: 0.1
-  xyz_scale: 0.2
-  max_depth: 20
   depth_cond: true
-  
+
+dataset:
+  height: 224
+  width: 336
+  pad_border_aug: 0

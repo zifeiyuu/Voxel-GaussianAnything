@@ -55,12 +55,11 @@ class GATModel(BaseModel):
         # define the model
         if "moge" in cfg.model.backbone.name:
             self.encoder = MoGe_MVEncoder(cfg)
-            
-        self.parameters_to_train += self.encoder.get_parameter_groups()
+            self.parameters_to_train += self.encoder.get_parameter_groups()
         head_in_dim = [cfg.model.backbone.pts_feat_dim]
 
         self.voxel_size, self.pc_range, self.coarse_voxel_size = cfg.model.voxel_size, cfg.model.pc_range, cfg.model.coarse_voxel_size
-        self.voxel_size_factor = cfg.model.coarse_voxel_size // cfg.model.voxel_size
+        self.voxel_size_factor = cfg.model.coarse_voxel_size / cfg.model.voxel_size
         # self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[cfg.model.voxel_feat_dim, cfg.model.voxel_feat_dim], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
         # self.parameters_to_train += [{"params": self.vfe.parameters()}]
 
@@ -269,79 +268,10 @@ class GATModel(BaseModel):
         return embed.permute(3, 0, 1, 2).unsqueeze(0)  # Shape: (1, embed_dim, D, H, W)
     
     def forward(self, inputs):
-        if self.pre_train_flag:
-            output = self.forward_voxpred(inputs)
-        else:
-            output = self.forward_gsm(inputs)
+        
+        output = self.forward_gsm(inputs)
             
         return output
-        
-    def forward_voxpred(self, inputs):
-        cfg = self.cfg
-        B, C, H, W = inputs["color_aug", 0, 0].shape
-        # we predict points and associated features in 3d space directly
-        # we do not use unprojection, so as camera intrinsics
-        outputs = {}
-        # TODO: Add multive image and voxel predictor 
-        self.encoder(inputs, outputs) # (B, N, 3), (B, N, C), (B, N, 3)
-
-        if cfg.model.gaussian_rendering:
-            self.process_gt_poses(inputs, outputs, pretrain=self.pre_train_flag)
-        # First, Voxelization and decode pre-batch data here
-        # get pre-batch point cloud here!
-        gt_points, gt_points_dict, depth_error = self.get_projected_points(inputs, outputs)
-        outputs["gt_points"] = gt_points
-        outputs["error"] = depth_error
-        coors_list, voxels_features_list = [], []
-        binary_logits, binary_voxel, rest_binary_voxel_list = [], [], []
-        
-        for b in range(cfg.data_loader.batch_size):
-            pts_enc_feat = outputs[('pts_feat', 0)][b]
-            pts_rgb = outputs[('pts_rgb', 0)][b]
-
-            # ONLY SRC VIEW VOXELS HERE
-            voxels_features, coors, voxel_centers = prepare_voxel_features_scatter_mean(gt_points_dict[b][0], pts_enc_feat, pts_rgb, voxel_size=self.coarse_voxel_size, point_cloud_range=self.pc_range)
-            # features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_dict[b][0], pts_enc_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
-            # voxels_features = self.vfe(features, num_points, coors)      
-
-            if self.binary_predictor:
-                # # SRC + NOVEL VIEW VOXELS(PREDICTED)
-                batch_binary_logits, _, batch_pred_feat = self.vox_pred(voxels_features, coors, max_pooling=False)  # batch_pred_feat (B, Z, Y, X, 64)
-                # get gt corase voxel here
-                batch_binary_voxel, batch_gt_voxel_centers = self.get_binary_voxels(gt_points[b], voxel_size=self.coarse_voxel_size)
-                batch_binary_voxel = batch_binary_voxel.float()
-                batch_gt_voxel_centers = batch_gt_voxel_centers.float()
-
-                padding_coors, rest_padding_binary_voxel = self.padding_voxel_feature(coors, (batch_binary_logits.sigmoid() > 0.5).float(), voxel_size=self.coarse_voxel_size)   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
-                
-                coors = padding_coors
-
-                binary_voxel.append(batch_binary_voxel)
-                binary_logits.append(batch_binary_logits)
-                rest_binary_voxel_list.append(rest_padding_binary_voxel)
-
-            coors_list.append(coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
-            voxels_features_list.append(voxels_features)
-
-        K_6d = self.intrinsic_matrix_to_6d(inputs[("K_src", 0)], H, W)
-        img_features = rearrange(outputs[('pts_feat', 0)].unsqueeze(1), "b n (h w) c -> b n c h w", h=H, w=W)
-        #3D UNET
-        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.unet3d(coors_list, [self.voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_6d)
-        outputs["gauss_means"] = position_list
-        outputs["gauss_opacity"] = opacity_list
-        outputs["gauss_scaling"] = scaling_list
-        outputs["gauss_rotation"] = rotation_list
-        outputs["gauss_features_dc"] = feat_dc_list
-
-        if self.binary_predictor:
-            # save binary_voxel and binary_logits
-            binary_logits, binary_voxel, rest_binary_voxel = torch.cat(binary_logits, dim=0), torch.cat(binary_voxel, dim=0), torch.cat(rest_binary_voxel_list, dim=0)
-            outputs["binary_logits"], outputs["binary_voxel"], outputs["rest_binary_voxel"] = binary_logits, binary_voxel, rest_binary_voxel
-
-        if cfg.model.gaussian_rendering:
-            self.render_images(inputs, outputs)
-
-        return outputs
 
     def forward_gsm(self, inputs):
         cfg = self.cfg

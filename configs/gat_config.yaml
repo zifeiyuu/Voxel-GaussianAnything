@@ -3,15 +3,15 @@ defaults:
   - _self_
   - hydra: defaults
   - model: new_gat_model 
-  - dataset: scannetpp # pixelsplat scannetpp
+  - dataset: scannetpp # pixelsplat scannetpp arkitscenes
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "debugggg" 
+  exp_name: "unet_binary" 
   file: "gat_config.yaml"
 
 data_loader:
-  batch_size: 1
+  batch_size: 2
   num_workers: 16
 
 train:
@@ -27,18 +27,18 @@ train:
     use: true
     update_every: 10
     update_after_step: 100
-    beta: 0.99
+    beta: 0.9999
 
 optimiser:
   learning_rate: 1e-4 # 1e-4 for total bs=32 (minibatch*gpu_num)
-  num_epochs: 100
+  num_epochs: 20
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
-  accumulation_steps: 1
+  accumulation_steps: 2
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0
-  max_training_steps: 200000
+  max_training_steps: 240000
   min_lr_ratio: 0.1
   grad_clip: false
   max_norm: 1
@@ -49,7 +49,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 20
+  log_frequency: 5000
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5
@@ -63,7 +63,7 @@ scene_ids: []
 output_path: ./output
 
 #ckpt path could be defined by user now
-ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/0.06rgb_bce/pretrain/ckpt #./exp/re10k_v2/checkpoints
+ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/only_unet/gsm/ckpt #./exp/re10k_v2/checkpoints
 
 add_mask: false #only used with depth input(scannetpp)
 

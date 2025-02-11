@@ -266,7 +266,10 @@ def main(cfg: DictConfig):
     os.chdir(output_dir)
     print("Working dir:", output_dir)
 
-    if cfg.model.name:
+    if cfg.model.name == "unidepth":
+        model = GaussianPredictor(cfg)
+        model._is_train = False
+    elif cfg.model.name:
         from models.gat_model import GATModel
         model = GATModel(cfg)
     else:
@@ -278,7 +281,14 @@ def main(cfg: DictConfig):
 
     ckpt_path = Path(cfg.ckpt_path)
     if ckpt_path.exists():
-        model.load_model(ckpt_path, ckpt_ids=0, load_optimizer=False, load_ema=False)
+        if ckpt_path == Path("/mnt/ziyuxiao/code/GaussianAnything/exp/re10k_v2/checkpoints"):
+            model.load_model_old(ckpt_path, ckpt_ids=0)
+        else:
+            model.load_model(ckpt_path, ckpt_ids=0, load_optimizer=False, load_ema=True)
+        
+        print(f"loading checkpoint from {ckpt_path}")
+    else:
+        print("no checkpoint found, evaluate on new model")
 
     split = "test"
     save_vis = cfg.save_vis
@@ -298,7 +308,7 @@ def main(cfg: DictConfig):
         score_dict_by_name = evaluate(model, cfg, evaluator, dataloader, 
                                     device=device, save_vis=save_vis, output_path = output_path)
         print(json.dumps(score_dict_by_name, indent=4))
-        if cfg.dataset.name=="re10k" or cfg.dataset.name=="pixelsplat" or cfg.dataset.name=="scannetpp":
+        if cfg.dataset.name=="arkitscenes" or cfg.dataset.name=="pixelsplat" or cfg.dataset.name=="scannetpp":
             with open("metrics_{}_{}_{}.json".format(cfg.dataset.name, split, cfg.dataset.test_split), "w") as f:
                 json.dump(score_dict_by_name, f, indent=4)
         with open("metrics_{}_{}.json".format(cfg.dataset.name, split), "w") as f:

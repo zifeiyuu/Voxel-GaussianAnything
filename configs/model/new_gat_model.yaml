@@ -34,7 +34,7 @@ scaled_offset: false
 one_gauss_decoder: false
 predict_offset: true #
 bg_colour: [0.5, 0.5, 0.5]
-shift_rays_half_pixel: forward
+shift_rays_half_pixel: zero
 
 predict_sh_offset: false
 sh_offset_scale: 0.09
@@ -57,11 +57,11 @@ point_head_scale: 1e-2
 point_head_bias: 0.0
 
 # voxel parameters
-voxel_size: 0.024
+voxel_size: 0.02
 pc_range: [-5.12, -5.12, 0, 5.12, 5.12, 15.36]
-coarse_voxel_size: 0.072
+coarse_voxel_size: 0.08
 voxel_feat_dim: 32
 dim_expand: 4
 
-binary_predictor: true
-direct_gaussian: true
+binary_predictor: false
+direct_gaussian: false

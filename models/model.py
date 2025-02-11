@@ -319,6 +319,28 @@ class GaussianPredictor(nn.Module):
             for ckpt in ckpts[num_ckpts:]:
                 ckpt.unlink()
 
+    def load_model_old(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0):
+        """load model(s) from disk"""
+        weights_path = Path(weights_path)
+
+        if weights_path.is_dir():
+            ckpts = sorted(list(weights_path.glob("model_*.pth")), reverse=True)
+            weights_path = ckpts[ckpt_ids]
+        logging.info(f"Loading weights from {weights_path}...")
+        state_dict = torch.load(weights_path, map_location=torch.device(device))
+        new_dict = {}
+        for k, v in state_dict["model"].items():
+            if "backproject_depth" in k:
+                new_dict[k] = self.state_dict()[k].clone()
+            else:
+                new_dict[k] = v.clone()
+        self.load_state_dict(new_dict, strict=False)
+        
+        # loading adam state
+        if optimiser is not None:
+            optimiser.load_state_dict(state_dict["optimiser"])
+            self.step = state_dict["step"]
+
     def load_model(self, weights_path, optimiser=None, device="cpu", ckpt_ids=0, load_optimizer=True, load_ema=False):
         """load model(s) from disk"""
         weights_path = Path(weights_path)

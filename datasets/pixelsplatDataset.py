@@ -102,9 +102,6 @@ class pixelsplatDataset(Dataset):
         else:
             self._seq_keys = list(self._pose_data.keys())
 
-        # self._seq_keys = [i for i in self._seq_keys if i.startswith("0a004eb4d08f31dc")] #########################@@@@@@@@@@@@@@@@@
-
-
         missing_keys_path = self.data_folder / f"{self.split_name_for_loading}_missing_keys.txt"
         with open(missing_keys_path, 'r') as f:
             missing_keys = f.read().splitlines() 

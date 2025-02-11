@@ -38,7 +38,6 @@ class BaseModel(nn.Module):
         self.cfg = cfg
 
         self.parameters_to_train = []
-        self.predict_sh_offset = cfg.model.predict_sh_offset
     
     def get_parameter_groups(self):
         return self.parameters_to_train
@@ -136,7 +135,10 @@ class BaseModel(nn.Module):
             device = pos_input_frame.device
             dtype = pos_input_frame.dtype
 
-            frame_ids = self.all_frame_ids(inputs)[:4]
+            if self.training:
+                frame_ids = self.all_frame_ids(inputs)[:4]
+            else:
+                frame_ids = self.all_frame_ids(inputs)[:4]
 
             for frame_id in frame_ids:
                 if frame_id == 0:

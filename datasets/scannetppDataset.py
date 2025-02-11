@@ -58,9 +58,7 @@ class scannetppDataset(Dataset):
         self.max_fov = cfg.dataset.max_fov
         self.interp = Image.LANCZOS
         # self.loader = pil_loader
-
         self.to_tensor = T.ToTensor()
-        # self.loader = pil_loader
         if cfg.dataset.normalize:
             self.to_tensor = T.Compose([
                 T.ToTensor(),
@@ -164,8 +162,6 @@ class scannetppDataset(Dataset):
             for period_index, period in enumerate(self._pose_data[key]):
                 seq_len = len(period["poses"])
                 frame_ids = [i + left_offset for i in range(seq_len - extra_frames)]
-                # if self.cfg.train.pretrain:
-                #     frame_ids = frame_ids[0 :: 2]   # (self.frame_count - 1) // 2
                 seq_key_id_pairs = [(key, period_index, f_id) for f_id in frame_ids]
                 key_id_pairs += seq_key_id_pairs
         return key_id_pairs
