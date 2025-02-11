@@ -63,5 +63,5 @@ coarse_voxel_size: 0.0625
 voxel_feat_dim: 32
 dim_expand: 4
 
-binary_predictor: false
+binary_predictor: true
 direct_gaussian: false
