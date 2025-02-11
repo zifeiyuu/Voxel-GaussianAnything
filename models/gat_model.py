@@ -298,7 +298,7 @@ class GATModel(BaseModel):
                 binary_voxel.append(gt_binary_voxel.float())
                 binary_logits.append(batch_binary_logits.float())
                 rest_binary_voxel_list.append(padding_binary_voxel.float())
-                # padding_coors_list.append(padding_coors[:, [3,2,1]].to(torch.int64))
+                padding_coors_list.append(padding_coors[:, [3,2,1]].to(torch.int64))
 
             coors_list.append(coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
             voxels_features_list.append(voxels_features)
