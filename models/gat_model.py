@@ -8,9 +8,9 @@ from pathlib import Path
 from einops import rearrange
 import collections
 import copy
-
+import cv2
 from .encoder.moge_encoder import MoGe_MVEncoder
-from .encoder.voxel_encoder import prepare_hard_vfe_inputs_scatter_fast, prepare_voxel_features_scatter_mean, HardVFE, compute_voxel_coors_and_centers
+from .encoder.voxel_encoder import prepare_voxel_features_scatter_mean, HardVFE, compute_voxel_coors_and_centers
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from .base_model import BaseModel
 from .heads.gat_head import LinearHead
@@ -30,6 +30,7 @@ from IPython import embed
 
 from torch.utils.checkpoint import checkpoint
 from torch_scatter import scatter_mean
+import matplotlib.pyplot as plt
 
 def default_param_group(model):
     return [{'params': model.parameters()}]
@@ -200,6 +201,7 @@ class GATModel(BaseModel):
     
     
     def get_binary_voxels(self, points, voxel_size=0.08):
+        # _, coors, voxel_centers = prepare_voxel_features_scatter_mean(points, torch.zeros_like(points), torch.zeros_like(points), voxel_size=voxel_size, point_cloud_range=self.pc_range)
         coors, voxel_centers = compute_voxel_coors_and_centers(points, voxel_size=voxel_size, point_cloud_range=self.pc_range)
         
         canvs_size = (int(abs(self.pc_range[0] - self.pc_range[3]) / voxel_size), int(abs(self.pc_range[1] - self.pc_range[4]) / voxel_size), int(abs(self.pc_range[2] - self.pc_range[5]) / voxel_size))
@@ -286,23 +288,17 @@ class GATModel(BaseModel):
             if self.binary_predictor:
                 # # SRC + NOVEL VIEW VOXELS(PREDICTED)
                 # coarse voxel predicted
-                batch_binary_logits, _ = self.vox_pred(voxels_features, coors, max_pooling=True)  # batch_pred_feat (B, Z, Y, X, 64)
+                batch_binary_logits, gt_binary_voxel_single, coor = self.vox_pred(voxels_features, coors, max_pooling=True)  # batch_pred_feat (B, Z, Y, X, 64)
                 # get gt corase voxel (fine)
-                # breakpoint()
                 gt_binary_voxel, _ = self.get_binary_voxels(gt_points[b], voxel_size=self.coarse_voxel_size)
                 gt_binary_voxel = gt_binary_voxel.float()
-                # breakpoint()
-                # batch_binary_voxel, _ = self.get_binary_voxels(gt_points[b], voxel_size=self.coarse_voxel_size)
-                # batch_binary_voxel = batch_binary_voxel.float()
-
-                # coarse to fine
-                padding_coors, padding_binary_voxel, all_binary_voxel = self.padding_voxel_feature(coors, (batch_binary_logits.sigmoid() > 0.5).float())   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
                 
-                # padding_coors_list.append(padding_coors[:, [3,2,1]].to(torch.int64))
+                padding_coors, padding_binary_voxel, all_binary_voxel = self.padding_voxel_feature(coors, (batch_binary_logits.sigmoid() > 0.5).float())   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
 
                 binary_voxel.append(gt_binary_voxel.float())
                 binary_logits.append(batch_binary_logits.float())
                 rest_binary_voxel_list.append(padding_binary_voxel.float())
+                # padding_coors_list.append(padding_coors[:, [3,2,1]].to(torch.int64))
 
             coors_list.append(coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
             voxels_features_list.append(voxels_features)

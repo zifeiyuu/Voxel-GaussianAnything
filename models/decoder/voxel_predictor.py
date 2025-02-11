@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-
+import torch.nn.functional as F
 from torch_scatter import scatter_max
 
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
@@ -288,7 +288,7 @@ class VoxPredictor(nn.Module):
         self.cfg = cfg
 
         # scatter into a 2d canvs
-        self.voxel_size_factor = cfg.model.coarse_voxel_size // cfg.model.voxel_size
+        self.voxel_size_factor = cfg.model.coarse_voxel_size / cfg.model.voxel_size
         self.dim_expand = cfg.model.dim_expand
         canvs_size = (int(abs(cfg.model.pc_range[0] - cfg.model.pc_range[3]) / cfg.model.coarse_voxel_size), int(abs(cfg.model.pc_range[1] - cfg.model.pc_range[4]) / cfg.model.coarse_voxel_size), int(abs(cfg.model.pc_range[2] - cfg.model.pc_range[5]) / cfg.model.coarse_voxel_size))
         self.pts_middle_encoder = PillarsScatter(in_channels=cfg.model.voxel_feat_dim, output_shape=canvs_size, in_channels_shrink=self.dim_expand)
@@ -298,7 +298,7 @@ class VoxPredictor(nn.Module):
         self.parameters_to_train += default_param_group(self.dit_transformer)
         
         
-    def voxel_max_pooling(self, voxels_features, coors):
+    def voxel_max_pooling_sparse(self, voxels_features, coors):
         batch = coors[:, 0]
         z = coors[:, 1] // self.voxel_size_factor
         x = coors[:, 2] // self.voxel_size_factor
@@ -310,20 +310,20 @@ class VoxPredictor(nn.Module):
 
         new_voxels_features, _ = scatter_max(voxels_features, inverse_indices, dim=0)
         new_coors = unique_coors
-        
+
         return new_voxels_features, new_coors
+    
         
         
     def forward(self, vfe_feat, coor, max_pooling=True):
         # first, we perfome sparse max pooling here
         if max_pooling:
-            vfe_feat, coor = self.voxel_max_pooling(vfe_feat, coor)
-
-        voxel_feature, binary_voxel = self.pts_middle_encoder(vfe_feat, coor, 1)
+            vfe_feat, coor = self.voxel_max_pooling_sparse(vfe_feat, coor)
         
+        voxel_feature, binary_voxel = self.pts_middle_encoder(vfe_feat, coor, 1)
         pred_binary_logits = self.dit_transformer(voxel_feature)
         
-        return pred_binary_logits, binary_voxel
+        return pred_binary_logits, binary_voxel, coor
         
         
     def get_parameter_groups(self):
