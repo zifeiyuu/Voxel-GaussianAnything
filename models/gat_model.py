@@ -246,15 +246,6 @@ class GATModel(BaseModel):
         return embed.permute(3, 0, 1, 2).unsqueeze(0)  # Shape: (1, embed_dim, D, H, W)
 
     def forward(self, inputs):
-<<<<<<< HEAD
-        
-        output = self.forward_gsm(inputs)
-            
-        return output
-
-    def forward_gsm(self, inputs):
-=======
->>>>>>> myc_unet3d_binary
         cfg = self.cfg
         B, C, H, W = inputs["color_aug", 0, 0].shape
         # we predict points and associated features in 3d space directly
