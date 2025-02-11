@@ -7,7 +7,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "unet_binary" 
+  exp_name: "binary+raycast" # binary_pred_mv_8gpu_fix
   file: "gat_config.yaml"
 
 data_loader:
