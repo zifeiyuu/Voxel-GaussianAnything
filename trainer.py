@@ -227,9 +227,9 @@ class Trainer(nn.Module):
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
-                frame_ids = self.model.module.all_frame_ids(inputs)[:4]
+                frame_ids = self.model.module.all_frame_ids(inputs)[: self.cfg.train.train_view_num]
             else:
-                frame_ids = self.model.all_frame_ids(inputs)[:4]
+                frame_ids = self.model.all_frame_ids(inputs)[: self.cfg.train.train_view_num]
 
             rec_loss = 0
             for frame_id in frame_ids:

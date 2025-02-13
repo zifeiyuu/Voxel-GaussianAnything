@@ -238,15 +238,19 @@ class AttentionBlock(nn.Module):
     def attention(self, qkv: VDBTensor):
         values = []
         for batch_idx in range(qkv.grid.grid_count):
-            values.append(self._attention(qkv.data[batch_idx].jdata))            
-        return fvdb.JaggedTensor(values)
+            values.append(self._attention(qkv.data[batch_idx].jdata))           
+        return values  ### fvdb.JaggedTensor(values) ###
 
     def forward(self, x: VDBTensor):
         return self._forward(x), None # !: return None for feat_depth
 
     def _forward(self, x: VDBTensor):
         qkv = self.qkv(self.norm(x))
-        feature = self.attention(qkv)
+        values = self.attention(qkv)
+        if qkv.grid.grid_count > 1:
+            feature = fvdb.JaggedTensor(values)
+        else:
+            feature = x.grid.jagged_like(torch.cat(values, dim=0))   ##### buggy when batch size = 1, modified by myself, not sure ####
         feature = VDBTensor(x.grid, feature, x.kmap)
         feature = self.proj_out(feature)
         return feature + x
@@ -369,21 +373,22 @@ class Modified3DUnet(nn.Module):
                 if gs_dim == 14: # rgb
                     init_value[:, 11:14] = 0.5
                 self.render_head_hybrid.OutConv.bias.data = init_value.view(-1)
-            # ! 3D only head
-            self.render_head_3D = LinearHead(n_features[1], gsplat_upsample * gs_dim, order, num_groups, enhanced=gs_enhanced)
-            if apply_gs_init:
-                self.render_head_3D.OutConv.weight.data.zero_()
-                init_value = self.render_head_3D.OutConv.bias.data.view(gsplat_upsample, gs_dim)
-                init_value[:, :3] = 0.0
-                if gsplat_upsample > 1:
-                    init_value[:, :3] = torch.randn_like(init_value[:, :3]) * 0.5
-                init_value[:, 3:6] = math.log(gs_init_scale)
-                init_value[:, 6] = 1.0
-                init_value[:, 7:10] = 0.0
-                init_value[:, 10] = math.log(0.1 / (1 - 0.1))
-                if gs_dim == 14: # rgb
-                    init_value[:, 11:14] = 0.5
-                self.render_head_3D.OutConv.bias.data = init_value.view(-1)
+
+            # # ! 3D only head
+            # self.render_head_3D = LinearHead(n_features[1], gsplat_upsample * gs_dim, order, num_groups, enhanced=gs_enhanced)
+            # if apply_gs_init:
+            #     self.render_head_3D.OutConv.weight.data.zero_()
+            #     init_value = self.render_head_3D.OutConv.bias.data.view(gsplat_upsample, gs_dim)
+            #     init_value[:, :3] = 0.0
+            #     if gsplat_upsample > 1:
+            #         init_value[:, :3] = torch.randn_like(init_value[:, :3]) * 0.5
+            #     init_value[:, 3:6] = math.log(gs_init_scale)
+            #     init_value[:, 6] = 1.0
+            #     init_value[:, 7:10] = 0.0
+            #     init_value[:, 10] = math.log(0.1 / (1 - 0.1))
+            #     if gs_dim == 14: # rgb
+            #         init_value[:, 11:14] = 0.5
+            #     self.render_head_3D.OutConv.bias.data = init_value.view(-1)
 
         self.gsplat_upsample = gsplat_upsample
         self.addtional_gs_constraint = addtional_gs_constraint
@@ -704,15 +709,21 @@ class Modified3DUnet(nn.Module):
                     occ_render_feature = self.render_head_hybrid(VDBTensor(cur_occ_grid, cur_occ_grid.jagged_like(occ_voxel_hybrid_feature)))
                     occ_abs_pos, occ_scaling, occ_rotation, occ_opacity, occ_color = self.feature2gs(cur_occ_grid, occ_render_feature.data.jdata, gs_free_space=self.gs_free_space, max_scaling=self.max_scaling)
 
-                    non_occ_render_feature = self.render_head_3D(VDBTensor(cur_occ_grid, cur_occ_grid.jagged_like(occ_voxel_3D_feature)))
-                    abs_pos, scaling, rotation, opacity, color = self.feature2gs(cur_occ_grid, non_occ_render_feature.data.jdata, gs_free_space= "hard", max_scaling = 1)
+                    # non_occ_render_feature = self.render_head_3D(VDBTensor(cur_occ_grid, cur_occ_grid.jagged_like(occ_voxel_3D_feature)))
+                    # abs_pos, scaling, rotation, opacity, color = self.feature2gs(cur_occ_grid, non_occ_render_feature.data.jdata, gs_free_space= "hard", max_scaling = 1)
 
-                    position_list.append(torch.cat([abs_pos, occ_abs_pos], dim=0))
-                    scaling_list.append(torch.cat([scaling, occ_scaling], dim=0))
-                    rotation_list.append(torch.cat([rotation, occ_rotation], dim=0))
-                    opacity_list.append(torch.cat([opacity, occ_opacity], dim=0))
-                    feat_dc_list.append(torch.cat([color, occ_color], dim=0))              
-                
+                    # position_list.append(torch.cat([abs_pos, occ_abs_pos], dim=0))
+                    # scaling_list.append(torch.cat([scaling, occ_scaling], dim=0))
+                    # rotation_list.append(torch.cat([rotation, occ_rotation], dim=0))
+                    # opacity_list.append(torch.cat([opacity, occ_opacity], dim=0))
+                    # feat_dc_list.append(torch.cat([color, occ_color], dim=0))  
+
+                    position_list.append(occ_abs_pos)
+                    scaling_list.append(occ_scaling)
+                    rotation_list.append(occ_rotation)
+                    opacity_list.append(occ_opacity)
+                    feat_dc_list.append(occ_color)    
+
         return position_list, opacity_list, scaling_list, rotation_list, feat_dc_list
     
     def feature2gs(self, grid, feature, gs_free_space= "hard", max_scaling = 1):
@@ -793,21 +804,6 @@ class Modified3DUnet(nn.Module):
         hash_tree = self.build_normal_hash_tree(x.grid)
         res, x, encoder_features = self.encode(x, hash_tree)
         position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.decode(res, x, hash_tree, encoder_features, img_features, camera_pose, intrinsics)
-    
-
-        # for b in range(batch_size):
-        #     extra_grid = fvdb.gridbatch_from_ijk(
-        #         fvdb.JaggedTensor([coors[b]]),  
-        #         voxel_sizes=[voxel_sizes],
-        #         origins=[origins]
-        #     )
-        #     extra_feature = self.render_head_hybrid(VDBTensor(extra_grid, extra_grid.jagged_like(torch.cat([voxel_features[b], voxel_features[b]], dim=1))))
-        #     abs_pos, scaling, rotation, opacity, color = self.feature2gs(extra_grid, extra_feature.data.jdata)
-        #     position_list[b] = torch.cat([position_list[b], abs_pos], dim=0)
-        #     opacity_list[b] = torch.cat([opacity_list[b], opacity], dim=0)
-        #     scaling_list[b] = torch.cat([scaling_list[b], scaling], dim=0)
-        #     rotation_list[b] = torch.cat([rotation_list[b], rotation], dim=0)
-        #     feat_dc_list[b] = torch.cat([feat_dc_list[b], color], dim=0)
 
         return position_list, opacity_list, scaling_list, rotation_list, feat_dc_list
 
@@ -873,7 +869,7 @@ class Lifter(nn.Module):
             intrinsics[..., [0,2,4]] = intrinsics[..., [0,2,4]] / downsample_w
 
         # Image padding to expand coverage
-        padding_size = 28 
+        padding_size = 42
         B, N, C, H, W = img_features.shape
         img_features = img_features.view(B * N, C, H, W)  # Flatten B and N into one batch
         img_features = F.pad(img_features, (padding_size, padding_size, padding_size, padding_size), mode="reflect")

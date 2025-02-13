@@ -136,9 +136,9 @@ class BaseModel(nn.Module):
             dtype = pos_input_frame.dtype
 
             if self.training:
-                frame_ids = self.all_frame_ids(inputs)[:4]
+                frame_ids = self.all_frame_ids(inputs)[: cfg.train.train_view_num]
             else:
-                frame_ids = self.all_frame_ids(inputs)[:4]
+                frame_ids = self.all_frame_ids(inputs)[: 4]
 
             for frame_id in frame_ids:
                 if frame_id == 0:

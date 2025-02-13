@@ -419,6 +419,19 @@ class MoGe_MVEncoder(nn.Module):
             pts_depth = rearrange(depth, '(b c) h w -> b (h w) c', b=B) #B (H W) C
             mask = rearrange(mask, '(b c) h w -> b (h w) c', b=B) #B (H W) C
 
+            # back project depth to world splace
+            scale = self.cfg.model.scales[0]
+            pts3d = self.backproject_depth[str(scale)](pts_depth, inv_K)
+            pts3d = rearrange(pts3d, 'b c n -> b n c')[:, :, :3]
+
+            pts_depth_origin = rearrange(pts_depth, 'b (h w) c -> b c h w', h=H, w=W) #B (H W) C
+            if frame_id != 0:
+                outputs[("depth_pred", frame_id)] = pts_depth_origin
+                continue
+
+            #directly give decoder rgb information for each 3d point
+            pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
+
             # vit encoder to get per-image features
             # Encode
             encoder_outputs = features[-1][0] #last layer of transformer    
@@ -427,14 +440,5 @@ class MoGe_MVEncoder(nn.Module):
             
             pts_feat = self.pts_feat_head(encoder_outputs)  # (B, H / P * W / P, EMBED_DIM) ->(B, H / P * W / P, p^2*D)
             pts_feat = rearrange(pts_feat, 'b hpwp (p d) -> b (hpwp p) d', p=self.patch_size**2, d=self.pts_feat_dim)  # B H*W D          
-            
-            # back project depth to world splace
-            scale = self.cfg.model.scales[0]
-            pts3d = self.backproject_depth[str(scale)](pts_depth, inv_K)
-            pts3d = rearrange(pts3d, 'b c n -> b n c')[:, :, :3]
-
-            #directly give decoder rgb information for each 3d point
-            pts_rgb = rearrange(rgbs, 'b c h w -> b (h w) c')
-            pts_depth_origin = rearrange(pts_depth, 'b (h w) c -> b c h w', h=H, w=W) #B (H W) C
             
             outputs[("pts3d", frame_id)], outputs[("pts_feat", frame_id)], outputs[("pts_rgb", frame_id)], outputs[("depth_pred", frame_id)] = pts3d, pts_feat, pts_rgb, pts_depth_origin
