@@ -111,10 +111,10 @@ class GATModel(BaseModel):
                 int(abs(self.pc_range[2] - self.pc_range[5]) / self.voxel_size)
             )
             fine_binary_canvas = torch.zeros(1, fine_canvas_size[2], fine_canvas_size[1], fine_canvas_size[0], dtype=src_coors.dtype, device=src_coors.device)
-
-            empty_binary_canvas = fine_binary_canvas.clone()
-            fine_binary_canvas[:, src_coors[:, 1], src_coors[:, 2], src_coors[:, 3]] = 1
-            return rest_coors, empty_binary_canvas, fine_binary_canvas
+            empty_binary_canvas = fine_binary_canvas
+            # empty_binary_canvas = fine_binary_canvas.clone()
+            # fine_binary_canvas[:, src_coors[:, 1], src_coors[:, 2], src_coors[:, 3]] = 1
+            return rest_coors, empty_binary_canvas, torch.ones(1, 3, dtype=src_coors.dtype, device=src_coors.device)
 
         # Convert coarse coors to fine
         if self.voxel_size != self.coarse_voxel_size:
