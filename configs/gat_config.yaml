@@ -7,7 +7,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "raycasting+soft" # binary_pred_mv_8gpu_fix
+  exp_name: "raycast_fix" # binary_pred_mv_8gpu_fix
   file: "gat_config.yaml"
 
 data_loader:

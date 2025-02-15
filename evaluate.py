@@ -205,15 +205,12 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
 
             if cfg.model.binary_predictor:
                 # calculate iou 
-                binary_logits, binary_voxels, rest_binary_voxels = outputs['binary_logits'], outputs['binary_voxel'], outputs["rest_binary_voxel"]
+                binary_logits, binary_voxels = outputs['binary_logits'], outputs['binary_voxel']
                 rec_iou = ((binary_logits.sigmoid() >= 0.5) & (binary_voxels >= 0.5)).sum() / (
                     (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
                 ).sum()
-                # rest_iou = ((binary_logits.sigmoid() >= 0.5) & (rest_binary_voxels >= 0.5) & (binary_voxels >= 0.5)).sum() / (
-                #     (binary_logits.sigmoid() >= 0.5) | (binary_voxels >= 0.5)
-                # ).sum()
                 iou_list.append(rec_iou)
-                rest_iou_list.append(rec_iou)
+
                 
             pbar.update(batch_size)
 
@@ -236,13 +233,11 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
         result_content.append(metric_line)
     json_content = json.dumps(score_dict_by_name, indent=4)
 
-    if len(iou_list) > 0 and len(rest_iou_list) > 0:
+    if len(iou_list) > 0:
         mean_iou = sum(iou_list) / len(iou_list)
-        mean_rest_iou = sum(rest_iou_list) / len(rest_iou_list)
     else:
         mean_iou = 0
-        mean_rest_iou = 0
-    print(f"< Mean iou: {mean_iou}>, < Mean Rest iou: {mean_rest_iou}>")
+    print(f"< Mean iou: {mean_iou}>")
 
     # Write the combined content to the result.txt file
     result_txt_path = out_dir / "result.txt"

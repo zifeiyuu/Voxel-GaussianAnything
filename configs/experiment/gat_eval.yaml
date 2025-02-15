@@ -1,6 +1,6 @@
 # @package _global_
 config:
-  exp_name: only_unet
+  exp_name: debugg
 
 defaults:
   - override /dataset: scannetpp # arkitscenes
