@@ -757,7 +757,7 @@ class Modified3DUnet(nn.Module):
 
         return abs_pos.float(), scaling, rotation, opacity, color.unsqueeze(1) # for rasterizer
     
-    def forward(self, coors, padding_coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics):
+    def forward(self, coors, padding_coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics, depths):
         # coors list[N, 3]
         # padding coors list[N2, 3]
         # voxel_sizes [x, x, x]
@@ -766,6 +766,7 @@ class Modified3DUnet(nn.Module):
         # img_features [B, NUM_VIEW, C, H, W]        
         # camera_pose [B, NUM_VIEW, 4, 4]
         # intrinsics  [B, NUM_VIEW, 3, 3]
+        # depths [B NUM_VIEW C H W]
         
         batch_size = intrinsics.shape[0]
 
@@ -776,7 +777,7 @@ class Modified3DUnet(nn.Module):
                 origins=[origins for _ in range(batch_size)]
             )
 
-            padding_voxel_features = self.lifter(padding_grid, camera_pose, intrinsics, img_features)
+            padding_voxel_features = self.lifter(padding_grid, camera_pose, intrinsics, img_features, depths)
             del padding_grid
 
             for b in range(batch_size):
@@ -811,7 +812,7 @@ class Modified3DUnet(nn.Module):
 class Lifter(nn.Module):
     def __init__(self, img_in_dim, voxel_out_dim):
         super().__init__()
-        self.mix_fc = nn.Linear(img_in_dim, voxel_out_dim)
+        # self.mix_fc = nn.Linear(img_in_dim, voxel_out_dim)
 
     def create_rays_from_intrinsic_torch_batch(self, pose_matric, intrinsic):
         """
@@ -872,7 +873,7 @@ class Lifter(nn.Module):
         padding_size = 42
         B, N, C, H, W = img_features.shape
         img_features = img_features.view(B * N, C, H, W)  # Flatten B and N into one batch
-        img_features = F.pad(img_features, (padding_size, padding_size, padding_size, padding_size), mode="reflect")
+        img_features = F.pad(img_features, (padding_size, padding_size, padding_size, padding_size), mode="replicate")
         img_features = img_features.view(B, N, C, img_features.shape[-2], img_features.shape[-1])
         B, N, C, H, W = img_features.shape
         intrinsics[..., 2] += padding_size  # cx (center x)
@@ -916,7 +917,8 @@ class Lifter(nn.Module):
 
         return voxel_features
 
-    def forward(self, grid, camera_pose, intrinsics, img_features):
+    def forward(self, grid, camera_pose, intrinsics, img_features, depths):
+        # img_features = torch.cat([img_features, depths], dim=2)
         voxel_features = self.build_ray_casting_feature(grid, camera_pose, intrinsics, img_features)
-        voxel_features = [self.mix_fc(feature) for feature in voxel_features]
+        # voxel_features = [self.mix_fc(feature) for feature in voxel_features]
         return voxel_features

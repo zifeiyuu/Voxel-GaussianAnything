@@ -70,10 +70,7 @@ class Trainer(nn.Module):
         if self.cfg.task_name == "flash3d":
             losses = self.compute_flash3d_losses(inputs, outputs)
         else:
-            if self.pretrain:
-                losses = self.compute_pretraining_loss(inputs, outputs)
-            else:
-                losses = self.compute_losses(inputs, outputs)
+            losses = self.compute_losses(inputs, outputs)
         self.get_grad_norm(outputs)
         return losses, outputs
     

@@ -28,7 +28,7 @@ from IPython import embed
 logger = logging.getLogger(__name__)
 
 class scannetppDataset(Dataset):
-    def __init__(self, cfg, split):
+    def __init__(self, cfg, split, start_step=0):
         self.cfg = cfg
 
         self.split = split
@@ -138,6 +138,7 @@ class scannetppDataset(Dataset):
             )
             if self.cfg.dataset.subset != -1: # use cfg.subset source frames, they might come from the same sequence
                 self._seq_key_src_idx_pairs = self._seq_key_src_idx_pairs[:self.cfg['subset']] * (len(self._seq_key_src_idx_pairs) // self.cfg['subset']) 
+            self._seq_key_src_idx_pairs = self._seq_key_src_idx_pairs[start_step + 1:]
         else:
             #generate indices based on the strategy
             if self.cfg.video_mode:

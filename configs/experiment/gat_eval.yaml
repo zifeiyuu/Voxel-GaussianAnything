@@ -3,7 +3,7 @@ config:
   exp_name: only_unet
 
 defaults:
-  - override /dataset: arkitscenes
+  - override /dataset: scannetpp # arkitscenes
   - override /model: new_gat_model 
   - override /loss: [regularization, reconstruction]
 

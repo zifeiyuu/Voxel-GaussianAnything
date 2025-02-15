@@ -270,7 +270,7 @@ class BaseModel(nn.Module):
             weights_path = ckpts[ckpt_ids]
         logging.info(f"Loading weights from {weights_path}...")
         
-        state_dict = torch.load(weights_path, map_location=torch.device(device))
+        state_dict = torch.load(weights_path, map_location=device)
 
         if load_ema:
             model_dict = state_dict["ema_model"]  

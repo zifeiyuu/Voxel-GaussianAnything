@@ -143,6 +143,34 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None, batch=0):
         path / "predicted.ply"
     )
 
+    if name != "unidepth" and outputs["padding_points"]:
+        meansp = outputs["padding_points"][batch]
+        scalesp = torch.ones_like(meansp)
+        rotationsp = torch.ones((meansp.shape[0], 4), dtype=meansp.dtype, device=meansp.device)
+        opacitiesp = torch.ones((meansp.shape[0], 1), dtype=meansp.dtype, device=meansp.device)
+        harmonicsp = torch.ones((meansp.shape[0], 3), dtype=meansp.dtype, device=meansp.device) 
+        export_ply(
+            meansp,
+            scalesp,
+            rotationsp,
+            harmonicsp,
+            opacitiesp,
+            path / "padding.ply"
+        )
+        meanspp = torch.cat([means, meansp], dim=0)
+        scalespp = torch.cat([scales, scalesp], dim=0)
+        rotationspp = torch.cat([rotations, rotationsp], dim=0)
+        opacitiespp = torch.cat([opacities, opacitiesp], dim=0)
+        harmonicspp = torch.cat([harmonics, harmonicsp], dim=0)
+        export_ply(
+            meanspp,
+            scalespp,
+            rotationspp,
+            harmonicspp,
+            opacitiespp,
+            path / "padding_combine.ply"
+        )
+
     if name != "unidepth" and outputs["gt_points"]:
         means2 = outputs["gt_points"][batch]
         scales2 = torch.ones_like(means2)

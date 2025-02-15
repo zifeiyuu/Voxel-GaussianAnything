@@ -10,15 +10,17 @@ from datasets.pixelsplatDataset import pixelsplatDataset
 from datasets.scannetppDataset import scannetppDataset
 from datasets.arkitscenesDataset import arkitscenesDataset
 
-def create_datasets(cfg, split="val", distributed=False, rank=0):
+def create_datasets(cfg, split="val", distributed=False, rank=0, start_step=0):
 
     datasets_dict = {
         "pixelsplat": pixelsplatDataset,
         "scannetpp": scannetppDataset,
         "arkitscenes": arkitscenesDataset
     }[cfg.dataset.name]
-
-    dataset = datasets_dict(cfg, split)
+    if cfg.dataset.name == "scannetpp":
+        dataset = datasets_dict(cfg, split, start_step=start_step)
+    else:
+        dataset = datasets_dict(cfg, split)
     logging.info("There are {:d} {} items. Using {}\n".format(len(dataset), split, cfg.dataset)
     )
     shuffle = True if split == "train" else False

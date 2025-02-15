@@ -118,12 +118,16 @@ class GATModel(BaseModel):
 
         # Convert coarse coors to fine
         if self.voxel_size != self.coarse_voxel_size:
-            rest_coors, rest_binary_canvas, all_binary_canvas = self.upsample_voxel_coords(rest_coors, src_coors)   # input rest coors is coarse, src_coors is fine
-        else:
-            all_binary_canvas = rest_binary_canvas.clone()
-            all_binary_canvas[:, src_coors[:, 1], src_coors[:, 2], src_coors[:, 3]] = 1
+            rest_coors, rest_binary_canvas = self.upsample_voxel_coords(rest_coors, src_coors)   # input rest coors is coarse, src_coors is fine
 
-        return rest_coors, rest_binary_canvas, all_binary_canvas
+        grid_min = self.pc_range[:3]
+        rest_voxel_centers = torch.stack([
+            rest_coors[:, -1].float() * self.voxel_size + grid_min[0] + self.voxel_size / 2,
+            rest_coors[:, -2].float() * self.voxel_size + grid_min[1] + self.voxel_size / 2,
+            rest_coors[:, -3].float() * self.voxel_size + grid_min[2] + self.voxel_size / 2,
+        ], dim=1)  # Shape: [N + M, 3]
+
+        return rest_coors, rest_binary_canvas, rest_voxel_centers
     
     def upsample_voxel_coords(self, rest_coors, src_coors):
 
@@ -171,7 +175,7 @@ class GATModel(BaseModel):
         rest_binary_canvas = rest_binary_canvas * (fine_binary_canvas == 0)
         rest_coors = torch.nonzero(rest_binary_canvas)
 
-        return rest_coors, rest_binary_canvas, (rest_binary_canvas + fine_binary_canvas).clamp(max=1)
+        return rest_coors, rest_binary_canvas #, (rest_binary_canvas + fine_binary_canvas).clamp(max=1)
     
     def get_projected_points(self, inputs, outputs):
         depth_error = False
@@ -199,7 +203,7 @@ class GATModel(BaseModel):
         return pts3d_batch, depth_error
     
     
-    def get_binary_voxels(self, points, voxel_size=0.08):
+    def get_binary_voxels(self, points, voxel_size):
         # _, coors, voxel_centers = prepare_voxel_features_scatter_mean(points, torch.zeros_like(points), torch.zeros_like(points), voxel_size=voxel_size, point_cloud_range=self.pc_range)
         coors, voxel_centers = compute_voxel_coors_and_centers(points, voxel_size=voxel_size, point_cloud_range=self.pc_range)
         
@@ -272,6 +276,8 @@ class GATModel(BaseModel):
         outputs["error"] = depth_error
         coors_list, padding_coors_list, voxels_features_list = [], [], []
         binary_logits, binary_voxel, rest_binary_voxel_list = [], [], []
+
+        outputs["padding_points"] = []
         
         for b in range(cfg.data_loader.batch_size):
             pts_enc_feat = outputs[('pts_feat', 0)][b]
@@ -292,12 +298,14 @@ class GATModel(BaseModel):
                 gt_binary_voxel, _ = self.get_binary_voxels(gt_points[b], voxel_size=self.coarse_voxel_size)
                 gt_binary_voxel = gt_binary_voxel.float()
                 
-                padding_coors, padding_binary_voxel, all_binary_voxel = self.padding_voxel_feature(coors, (batch_binary_logits.sigmoid() > 0.5).float())   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
+                padding_coors, padding_binary_voxel, padding_xyz = self.padding_voxel_feature(coors, (batch_binary_logits.sigmoid() > 0.5).float())   # batch_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
 
                 binary_voxel.append(gt_binary_voxel.float())
                 binary_logits.append(batch_binary_logits.float())
                 rest_binary_voxel_list.append(padding_binary_voxel.float())
                 padding_coors_list.append(padding_coors[:, [3,2,1]].to(torch.int64))
+
+                # outputs["padding_points"].append(padding_xyz)
 
             coors_list.append(coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
             voxels_features_list.append(voxels_features)
@@ -306,7 +314,7 @@ class GATModel(BaseModel):
         img_features = rearrange(torch.cat([outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]], dim=-1).unsqueeze(1), "b n (h w) c -> b n c h w", h=H, w=W)
         #3D UNET
         # breakpoint()
-        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.unet3d(coors_list, padding_coors_list, [self.voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_6d)
+        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.unet3d(coors_list, padding_coors_list, [self.voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_6d, outputs[("depth_pred", 0)].unsqueeze(1))
 
         if self.direct_gaussian:
             for b in range(B):
