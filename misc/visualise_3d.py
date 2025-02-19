@@ -185,19 +185,6 @@ def save_ply(outputs, path, gaussians_per_pixel=3, name=None, batch=0):
             opacitiesp,
             path / "padding.ply"
         )
-        meanspp = torch.cat([means2, meansp], dim=0)
-        scalespp = torch.cat([scales2, scalesp], dim=0)
-        rotationspp = torch.cat([rotations2, rotationsp], dim=0)
-        opacitiespp = torch.cat([opacities2, opacitiesp], dim=0)
-        harmonicspp = torch.cat([harmonics2, harmonicsp], dim=0)
-        export_ply(
-            meanspp,
-            scalespp,
-            rotationspp,
-            harmonicspp,
-            opacitiespp,
-            path / "padding_combine.ply"
-        )
         
     if name != "unidepth" and outputs["coarse_padding_points"]:
         meansp = outputs["coarse_padding_points"][batch]

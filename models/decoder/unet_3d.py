@@ -705,18 +705,25 @@ class Modified3DUnet(nn.Module):
                         raise NotImplementedError
                     
                     occ_voxel_3D_feature = cur_occ_tensor.data.jdata
+
                     occ_voxel_hybrid_feature = torch.cat([occ_voxel_2D_feature, occ_voxel_3D_feature], dim=1)
                     occ_render_feature = self.render_head_hybrid(VDBTensor(cur_occ_grid, cur_occ_grid.jagged_like(occ_voxel_hybrid_feature)))
                     occ_abs_pos, occ_scaling, occ_rotation, occ_opacity, occ_color = self.feature2gs(cur_occ_grid, occ_render_feature.data.jdata, gs_free_space=self.gs_free_space, max_scaling=self.max_scaling)
 
                     # non_occ_render_feature = self.render_head_3D(VDBTensor(cur_occ_grid, cur_occ_grid.jagged_like(occ_voxel_3D_feature)))
-                    # abs_pos, scaling, rotation, opacity, color = self.feature2gs(cur_occ_grid, non_occ_render_feature.data.jdata, gs_free_space= "hard", max_scaling = 1)
+                    # abs_pos, scaling, rotation, opacity, color = self.feature2gs(cur_occ_grid, non_occ_render_feature.data.jdata, gs_free_space=self.gs_free_space, max_scaling=self.max_scaling)
 
                     # position_list.append(torch.cat([abs_pos, occ_abs_pos], dim=0))
                     # scaling_list.append(torch.cat([scaling, occ_scaling], dim=0))
                     # rotation_list.append(torch.cat([rotation, occ_rotation], dim=0))
                     # opacity_list.append(torch.cat([opacity, occ_opacity], dim=0))
                     # feat_dc_list.append(torch.cat([color, occ_color], dim=0))  
+
+                    # position_list.append(abs_pos)
+                    # scaling_list.append(scaling)
+                    # rotation_list.append(rotation)
+                    # opacity_list.append(opacity)
+                    # feat_dc_list.append(color) 
 
                     position_list.append(occ_abs_pos)
                     scaling_list.append(occ_scaling)
@@ -757,7 +764,7 @@ class Modified3DUnet(nn.Module):
 
         return abs_pos.float(), scaling, rotation, opacity, color.unsqueeze(1) # for rasterizer
     
-    def forward(self, coors, padding_coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics, depths):
+    def forward(self, coors, padding_coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics, depths, padding_confidence):
         # coors list[N, 3]
         # padding coors list[N2, 3]
         # voxel_sizes [x, x, x]
@@ -767,17 +774,32 @@ class Modified3DUnet(nn.Module):
         # camera_pose [B, NUM_VIEW, 4, 4]
         # intrinsics  [B, NUM_VIEW, 3, 3]
         # depths [B NUM_VIEW C H W]
+        # confidnence [N 1]
         
         batch_size = intrinsics.shape[0]
 
+        padded_img_features = img_features.clone()
+        padded_intrinsics = intrinsics.clone()
+
         if padding_coors:
+            padding_size = 56
+            B, N, C, H, W = padded_img_features.shape
+            padded_img_features = padded_img_features.view(B * N, C, H, W)  # Flatten B and N into one batch
+            padded_img_features = F.pad(padded_img_features, (padding_size, padding_size, padding_size, padding_size), mode="replicate")
+            padded_img_features = padded_img_features.view(B, N, C, padded_img_features.shape[-2], padded_img_features.shape[-1])
+            B, N, C, H, W = padded_img_features.shape
+            padded_intrinsics[..., 2] += padding_size  # cx (center x)
+            padded_intrinsics[..., 3] += padding_size  # cy (center y)
+            padded_intrinsics[..., 4] = W 
+            padded_intrinsics[..., 5] = H
+
             padding_grid = fvdb.gridbatch_from_ijk(
                 fvdb.JaggedTensor(padding_coors),  
                 voxel_sizes=[voxel_sizes for _ in range(batch_size)],
                 origins=[origins for _ in range(batch_size)]
             )
 
-            padding_voxel_features = self.lifter(padding_grid, camera_pose, intrinsics, img_features, depths)
+            padding_voxel_features = self.lifter(padding_grid, camera_pose, padded_intrinsics, padded_img_features, depths, padding_confidence)
             del padding_grid
 
             for b in range(batch_size):
@@ -793,18 +815,21 @@ class Modified3DUnet(nn.Module):
 
         x = fvnn.VDBTensor(x_grid, x_grid.jagged_like(allbatch_voxel_features))
 
-        n_imgs, H, W = img_features.size(1), img_features.size(3), img_features.size(4)
-
-        if (H != intrinsics[..., 5]).all() or (W != intrinsics[..., 4]).all():
-            downsample_h = intrinsics[0, 0, 5] / H
-            downsample_w = intrinsics[0, 0, 4] / W
-            intrinsics[..., [1,3,5]] = intrinsics[..., [1,3,5]] / downsample_h
-            intrinsics[..., [0,2,4]] = intrinsics[..., [0,2,4]] / downsample_w
+        n_imgs, H, W = padded_img_features.size(1), padded_img_features.size(3), padded_img_features.size(4)
+        if (H != padded_intrinsics[..., 5]).all() or (W != padded_intrinsics[..., 4]).all():
+            print("intrinsic HWs has problem!")
+            downsample_h = padded_intrinsics[0, 0, 5] / H
+            downsample_w = padded_intrinsics[0, 0, 4] / W
+            padded_intrinsics[..., [1,3,5]] = padded_intrinsics[..., [1,3,5]] / downsample_h
+            padded_intrinsics[..., [0,2,4]] = padded_intrinsics[..., [0,2,4]] / downsample_w
 
         # build a hash tree
         hash_tree = self.build_normal_hash_tree(x.grid)
         res, x, encoder_features = self.encode(x, hash_tree)
-        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.decode(res, x, hash_tree, encoder_features, img_features, camera_pose, intrinsics)
+        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.decode(res, x, hash_tree, encoder_features, padded_img_features, camera_pose, padded_intrinsics)
+        
+        del padded_img_features
+        del padded_intrinsics
 
         return position_list, opacity_list, scaling_list, rotation_list, feat_dc_list
 
@@ -812,7 +837,7 @@ class Modified3DUnet(nn.Module):
 class Lifter(nn.Module):
     def __init__(self, img_in_dim, voxel_out_dim):
         super().__init__()
-        # self.mix_fc = nn.Linear(img_in_dim, voxel_out_dim)
+        self.mix_fc = nn.Linear(img_in_dim, voxel_out_dim)
 
     def create_rays_from_intrinsic_torch_batch(self, pose_matric, intrinsic):
         """
@@ -843,7 +868,7 @@ class Lifter(nn.Module):
 
         return camera_origin, d
 
-    def build_ray_casting_feature(self, grid, camera_pose, intrinsics, img_features):
+    def build_ray_casting_feature(self, grid, camera_pose, padded_intrinsics, padded_img_features):
         """
         This is previous `build_occulusion_feature_cube`, I use the new name for more accurate meaning
 
@@ -861,37 +886,26 @@ class Lifter(nn.Module):
         """
 
         voxel_features = []
-        n_imgs, H, W = img_features.size(1), img_features.size(3), img_features.size(4)
+        n_imgs, H, W = padded_img_features.size(1), padded_img_features.size(3), padded_img_features.size(4)
         # update the batch[DS.IMAGES_INPUT_INTRINSIC]
-        if (H != intrinsics[..., 5]).all() or (W != intrinsics[..., 4]).all():
-            downsample_h = intrinsics[0, 0, 5] / H
-            downsample_w = intrinsics[0, 0, 4] / W
-            intrinsics[..., [1,3,5]] = intrinsics[..., [1,3,5]] / downsample_h
-            intrinsics[..., [0,2,4]] = intrinsics[..., [0,2,4]] / downsample_w
-
-        # Image padding to expand coverage
-        padding_size = 42
-        B, N, C, H, W = img_features.shape
-        img_features = img_features.view(B * N, C, H, W)  # Flatten B and N into one batch
-        img_features = F.pad(img_features, (padding_size, padding_size, padding_size, padding_size), mode="replicate")
-        img_features = img_features.view(B, N, C, img_features.shape[-2], img_features.shape[-1])
-        B, N, C, H, W = img_features.shape
-        intrinsics[..., 2] += padding_size  # cx (center x)
-        intrinsics[..., 3] += padding_size  # cy (center y)
-        intrinsics[..., 4] = W 
-        intrinsics[..., 5] = H
+        if (H != padded_intrinsics[..., 5]).all() or (W != padded_intrinsics[..., 4]).all():
+            print("intrinsic HW doesn't match!")
+            downsample_h = padded_intrinsics[0, 0, 5] / H
+            downsample_w = padded_intrinsics[0, 0, 4] / W
+            padded_intrinsics[..., [1,3,5]] = padded_intrinsics[..., [1,3,5]] / downsample_h
+            padded_intrinsics[..., [0,2,4]] = padded_intrinsics[..., [0,2,4]] / downsample_w
 
         for bidx in range(grid.grid_count):
             cur_grid = grid[bidx]
             cur_pose = camera_pose[bidx] # N, 4, 4
-            cur_intrinsics = intrinsics[bidx]
+            cur_intrinsics = padded_intrinsics[bidx]
 
             # [N, 3], [N, H, W, 3] -> [N * H * W, 3]
             nimg_origins, nimg_directions = self.create_rays_from_intrinsic_torch_batch(cur_pose, cur_intrinsics)
             nimg_origins = nimg_origins.view(n_imgs, 1, 1, 3).expand(-1, H, W, -1).reshape(-1, 3)
             nimg_directions = nimg_directions.reshape(-1, 3)
 
-            nimg_features = img_features[bidx] # N, C, H, W
+            nimg_features = padded_img_features[bidx] # N, C, H, W
             nimg_features = nimg_features.permute(0, 2, 3, 1).view(n_imgs * H * W, -1) # N, C, H, W -> N, H, W, C -> N * H * W, C
 
             if fvdb.__version__ == '0.0.0':
@@ -917,8 +931,10 @@ class Lifter(nn.Module):
 
         return voxel_features
 
-    def forward(self, grid, camera_pose, intrinsics, img_features, depths):
+    def forward(self, grid, camera_pose, padded_intrinsics, padded_img_features, depths, padding_confidence):
         # img_features = torch.cat([img_features, depths], dim=2)
-        voxel_features = self.build_ray_casting_feature(grid, camera_pose, intrinsics, img_features)
-        # voxel_features = [self.mix_fc(feature) for feature in voxel_features]
+        voxel_features = self.build_ray_casting_feature(grid, camera_pose, padded_intrinsics, padded_img_features)
+        for b in range(len(voxel_features)):
+            voxel_features[b] = torch.cat([voxel_features[b], padding_confidence[b]], dim=-1)
+        voxel_features = [self.mix_fc(feature) for feature in voxel_features]
         return voxel_features

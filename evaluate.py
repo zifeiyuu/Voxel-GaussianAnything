@@ -245,7 +245,6 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
         txt_file.write("\n".join(result_content) + "\n\n")
         txt_file.write(json_content)
         txt_file.write("\n" + str(mean_iou) + "\n")
-        txt_file.write("\n" + str(mean_rest_iou) + "\n")
 
     return score_dict_by_name
 

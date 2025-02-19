@@ -3,7 +3,7 @@ config:
   exp_name: flash3d_scannetpp
 
 defaults:
-  - override /dataset: arkitscenes
+  - override /dataset: scannetpp
   - override /model: gaussian
   - override /loss: [regularization, reconstruction]
 
