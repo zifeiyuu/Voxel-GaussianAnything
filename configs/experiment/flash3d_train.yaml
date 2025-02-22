@@ -1,18 +1,24 @@
 # @package _global_
 config:
-  exp_name: flash3d_scannetpp
+  exp_name: train_flash3d_scannetpp
 
 defaults:
-  - override /dataset: scannetpp
+  - override /dataset: scannetpp # scannetpp arkitscenes
   - override /model: gaussian
   - override /loss: [regularization, reconstruction]
 
 optimiser:
   scheduler_lambda_step_size: 500000
 
+data_loader:
+  batch_size: 1
+
 train:
   scale_pose_by_depth: true
   use_gt_poses: true
+  load_weights_folder: false
+
+save_vis: true
 
 model:
   name: unidepth

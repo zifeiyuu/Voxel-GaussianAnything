@@ -22,24 +22,6 @@ from misc.visualise_3d import save_ply
 
 from datasets.util import create_datasets
 from IPython import embed
-from torchviz import make_dot
-
-def visualize_model_graph(model, dataloader, device=None, save_path="model_graph", target_frame_ids=[1,2,3]):
-    dataloader_iter = iter(dataloader)
-    inputs = next(dataloader_iter)  # Assumes inputs are properly batched
-    inputs["target_frame_ids"] = target_frame_ids
-    if device is not None:
-        to_device(inputs, device)  # Move inputs to the appropriate device
-
-    # Forward pass to obtain the graph
-    with torch.no_grad():
-        outputs = model(inputs)
-        output_tensor = outputs[('color_gauss', 0, 0)]
-    # Generate and save the model graph
-    graph = make_dot(output_tensor, params=dict(model.named_parameters()))
-    save_path = str(save_path / "model_graph")
-    graph.render(save_path, format="png")
-    print(f"Model graph saved to {save_path}.png")
 
 def get_model_instance(model):
     """

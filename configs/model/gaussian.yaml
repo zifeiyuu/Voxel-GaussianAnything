@@ -35,4 +35,4 @@ opacity_bias: 0.0
 scale_bias: 0.02
 
 binary_predictor: false
-direct_gaussian: true
+direct_gaussian: false

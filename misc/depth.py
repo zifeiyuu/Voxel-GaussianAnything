@@ -42,30 +42,36 @@ def estimate_depth_scale(depth, sparse_depth):
     good_depth = torch.logical_and(z > eps, depth_pred > eps)
     z = z[good_depth]
     depth_pred = depth_pred[good_depth]
-
+    
+    valid_mask = torch.logical_and(sparse_depth > eps, sparse_depth < 20).bool()
+    if valid_mask.sum() == 0:  # Checks if all are False
+        print("No valid depth")
+        error = True
+        return torch.tensor(1.0, device=device, dtype=torch.float32), error
+    
     if z.shape[0] < 10:
-        return torch.tensor(1.0, device=device, dtype=torch.float32)
+        return torch.tensor(1.0, device=device, dtype=torch.float32), False
 
     scale = (depth_pred.log() - z.log()).mean().exp()
-    return scale
+    return scale, False
 
 def estimate_depth_scale_by_depthmap(depth, tgt_depth, max_depth=20):
     """
     depth: [1, 1, H, W]
     tgt_depth: [H, W]
     """
-
+    error = False
     eps = 1e-3
     device = depth.device
     tgt_depth = tgt_depth.to(device)   
     valid_mask = torch.logical_and((tgt_depth > eps), (tgt_depth < max_depth)).bool()
     if valid_mask.sum() == 0:  # Checks if all are False
-        print("Warning: No valid depth values found! GT depth map has problem")
-        return torch.tensor(1.0, device=device, dtype=depth.dtype)
+        error = True
+        return torch.tensor(1.0, device=device, dtype=depth.dtype), error
     # scale = (depth.squeeze()[valid_mask].log() - tgt_depth[valid_mask].log()).mean().exp()
     scale = depth.squeeze()[valid_mask].median() / tgt_depth[valid_mask].median()
 
-    return scale
+    return scale, error
 
 def estimate_depth_scale_bias(depth, tgt_depth, max_depth=20):
     """

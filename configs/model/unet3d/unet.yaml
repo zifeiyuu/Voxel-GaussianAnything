@@ -10,10 +10,10 @@ neck_dense_type: "UNCHANGED"
 neck_bound: [128, 128, 32] # ! useless
 use_attention: true
 gs_enhanced: "original"
-gsplat_upsample: 3
+gsplat_upsample: 2
 occ_upsample: 2
-max_scaling: 4
+max_scaling: 5
 max_return: 2
 feature_pooling_2d: "max"
-gs_free_space: "soft"
-gs_init_scale: 0.8
+gs_free_space: "soft-5"
+gs_init_scale: 0.9

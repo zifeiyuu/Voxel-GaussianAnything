@@ -1,9 +1,9 @@
 # @package _global_
 config:
-  exp_name: debugg
+  exp_name: gat_test
 
 defaults:
-  - override /dataset: scannetpp # arkitscenes
+  - override /dataset: arkitscenes # arkitscenes scannetpp
   - override /model: new_gat_model 
   - override /loss: [regularization, reconstruction]
 
@@ -13,6 +13,10 @@ optimiser:
 train:
   scale_pose_by_depth: true
   use_gt_poses: true
+  load_weights_folder: true
+
+ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/soft+scale5/gsm/ckpt
+save_vis: false
 
 model:
   gauss_novel_frames: [-1, 1, 2]
@@ -23,3 +27,6 @@ dataset:
   height: 224
   width: 336
   pad_border_aug: 0
+
+data_loader:
+  batch_size: 1

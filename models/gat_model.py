@@ -32,6 +32,7 @@ from pdb import set_trace
 from torch.utils.checkpoint import checkpoint
 from torch_scatter import scatter_mean
 import matplotlib.pyplot as plt
+from torch.cuda.amp import autocast
 
 def default_param_group(model):
     return [{'params': model.parameters()}]
@@ -51,7 +52,6 @@ class GATModel(BaseModel):
         self.pre_train_flag = cfg.train.pretrain
         self.using_frames = [0] + cfg.model.gauss_novel_frames
         self.binary_predictor = cfg.model.binary_predictor
-        self.direct_gaussian = cfg.model.direct_gaussian
         self.parameters_to_train = []
 
         # define the model
@@ -67,15 +67,13 @@ class GATModel(BaseModel):
 
         if self.binary_predictor:
             self.vox_pred = VoxPredictor(cfg)
+            # self.vox_pred.to(dtype=torch.bfloat16)
             self.parameters_to_train += self.vox_pred.get_parameter_groups()
+            
 
         kw = dict(copy.deepcopy(cfg.model.unet3d))
         self.unet3d = Modified3DUnet(**kw)
         self.parameters_to_train += [{"params": list(self.unet3d.parameters())}]
-
-        if self.direct_gaussian:
-            self.decoder_gs = LinearHead(cfg, head_in_dim, xyz_scale=cfg.model.xyz_scale, xyz_bias=cfg.model.xyz_bias, predict_offset=cfg.model.predict_offset)
-            self.parameters_to_train += self.decoder_gs.get_parameter_groups()
         
     def padding_voxel_feature(self, src_coors, pred_confidence):
         # WARNING! This function only take bs=1 input, i.e., the first dim of coords should always be zero
@@ -111,12 +109,18 @@ class GATModel(BaseModel):
             return coarse_rest_coors, torch.ones(0, 1, dtype=src_coors.dtype, device=src_coors.device), torch.ones(0, 3, dtype=src_coors.dtype, device=src_coors.device) # , torch.ones(1, 3, dtype=src_coors.dtype, device=src_coors.device)
 
         # Convert coarse coors to fine
-            # Use 8 corners + center
+
         fine_offsets = torch.tensor([
-            [-1, -1, -1], [1, -1, -1], [-1, 1, -1], [1, 1, -1],
-            [-1, -1, 1],  [1, -1, 1],  [-1, 1, 1],  [1, 1, 1], 
+            [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1],  [0, 0, -1], 
             [0, 0, 0]  
         ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
+
+        # Use 8 corners + center
+        # fine_offsets = torch.tensor([
+        #     [-1, -1, -1], [1, -1, -1], [-1, 1, -1], [1, 1, -1],
+        #     [-1, -1, 1],  [1, -1, 1],  [-1, 1, 1],  [1, 1, 1], 
+        #     [0, 0, 0]  
+        # ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
         # fine_offsets = torch.tensor([[0, 0, 0]], device=rest_coors.device)
 
         rest_coors, rest_fine_confidence = self.upsample_voxel_coords(coarse_rest_coors, src_coors, fine_offsets, pred_confidence)   # input rest coors is coarse, src_coors is fine
@@ -163,6 +167,7 @@ class GATModel(BaseModel):
 
         # Fill fine binary canvas
         rest_binary_canvas = fine_binary_canvas.float()
+        # rest_binary_canvas = rest_binary_canvas.to(torch.bfloat16)
         rest_binary_canvas[:, fine_rest_coors[:, 1], fine_rest_coors[:, 2], fine_rest_coors[:, 3]] = fine_confidence
         fine_binary_canvas[:, src_coors[:, 1], src_coors[:, 2], src_coors[:, 3]] = 1
         # ensure no overlap
@@ -252,27 +257,14 @@ class GATModel(BaseModel):
         outputs = {}
         # TODO: Add multive image and voxel predictor 
         self.encoder(inputs, outputs) # (B, N, 3), (B, N, C), (B, N, 3)
-
-        if self.direct_gaussian:
-            out = self.decoder_gs([outputs[('pts_feat', 0)]])
-            if cfg.model.predict_offset:
-                outputs["gauss_means"] = [outputs[("pts3d", 0)][b] + out["gauss_offset"][b] for b in range(B)]
-            else:
-                outputs["gauss_means"] = [outputs[("pts3d", 0)][b] for b in range(B)]
-            outputs["gauss_opacity"] = [out["gauss_opacity"][b] for b in range(B)]
-            outputs["gauss_scaling"] = [out["gauss_scaling"][b] for b in range(B)]
-            outputs["gauss_rotation"] = [out["gauss_rotation"][b] for b in range(B)]
-            outputs["gauss_features_dc"] = [out["gauss_features_dc"][b] for b in range(B)]
-            if cfg.model.predict_offset:
-                outputs["gauss_offset"] = out["gauss_offset"] #unused in render
-            del out
+        outputs["error"] = False
 
         self.process_gt_poses(inputs, outputs, pretrain=self.pre_train_flag)
         # First, Voxelization and decode pre-batch data here
         # get pre-batch point cloud here!
         gt_points, depth_error = self.get_projected_points(inputs, outputs)  ####### scale GT depth scale to MOGE scale????
         outputs["gt_points"] = gt_points
-        outputs["error"] = depth_error
+        outputs["error"] = depth_error or outputs["error"]
         coors_list, padding_coors_list, voxels_features_list = [], [], []
         binary_logits, binary_voxel = [], []
         padding_confidence_list = []
@@ -294,6 +286,7 @@ class GATModel(BaseModel):
             if self.binary_predictor:
                 # # SRC + NOVEL VIEW VOXELS(PREDICTED)
                 # coarse voxel predicted
+                # with autocast(dtype=torch.bfloat16):  
                 batch_binary_logits, gt_binary_voxel_single, coor = self.vox_pred(voxels_features, coors, max_pooling=True)  # batch_pred_feat (B, Z, Y, X, 64)
                 # get gt corase voxel (fine)
                 gt_binary_voxel, _ = self.get_binary_voxels(gt_points[b], voxel_size=self.coarse_voxel_size)
@@ -314,25 +307,38 @@ class GATModel(BaseModel):
             coors_list.append(coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
             voxels_features_list.append(voxels_features)
 
+        ############ avoid memory full
+        # max_points_coor = 47000
+        # for p in coors_list:
+        #     if p.shape[0] > max_points_coor:
+        #         outputs["error"] = True
+                
+        # max_points_pad = 16e4
+        # for p in padding_coors_list:
+        #     if p.shape[0] > max_points_pad:
+        #         outputs["error"] = True
+
+        # if outputs["error"] == True:
+        #     for b in range(B):
+        #         coors_list[b] = coors_list[b][: 1]
+        #         voxels_features_list[b] = voxels_features_list[b][: 1]
+        #         padding_coors_list[b] = padding_coors_list[b][: 1]
+        #         padding_confidence_list[b] = padding_confidence_list[b][: 1]
+        #     print("TO AVOID OUT OF MEMORY, SKIP THIS BATCH")
+        #     torch.cuda.empty_cache()
+        ###############
+
         K_6d = self.intrinsic_matrix_to_6d(inputs[("K_src", 0)], H, W)
         img_features = rearrange(torch.cat([outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]], dim=-1).unsqueeze(1), "b n (h w) c -> b n c h w", h=H, w=W)
         #3D UNET
         # breakpoint()
         position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.unet3d(coors_list, padding_coors_list, [self.voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_6d, outputs[("depth_pred", 0)].unsqueeze(1), padding_confidence_list)
 
-        if self.direct_gaussian:
-            for b in range(B):
-                outputs["gauss_means"][b] = torch.cat([outputs["gauss_means"][b], position_list[b]], dim=0)
-                outputs["gauss_opacity"][b] = torch.cat([outputs["gauss_opacity"][b], opacity_list[b]], dim=0)
-                outputs["gauss_scaling"][b] = torch.cat([outputs["gauss_scaling"][b], scaling_list[b]], dim=0)
-                outputs["gauss_rotation"][b] = torch.cat([outputs["gauss_rotation"][b], rotation_list[b]], dim=0)
-                outputs["gauss_features_dc"][b] = torch.cat([outputs["gauss_features_dc"][b], feat_dc_list[b]], dim=0)
-        else:
-            outputs["gauss_means"] = position_list
-            outputs["gauss_opacity"] = opacity_list
-            outputs["gauss_scaling"] = scaling_list
-            outputs["gauss_rotation"] = rotation_list
-            outputs["gauss_features_dc"] = feat_dc_list
+        outputs["gauss_means"] = position_list
+        outputs["gauss_opacity"] = opacity_list
+        outputs["gauss_scaling"] = scaling_list
+        outputs["gauss_rotation"] = rotation_list
+        outputs["gauss_features_dc"] = feat_dc_list
             
         if self.binary_predictor:
             # save binary_voxel and binary_logits

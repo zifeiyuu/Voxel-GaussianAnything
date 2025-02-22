@@ -132,29 +132,10 @@ class Trainer(nn.Module):
             loss += scale_invariant_depth_loss(render[mask], target[mask])
         return loss
     
-    def compute_cd_loss(self, inputs, outputs):
-        cfg = self.cfg
-        eps = 1e-3
-
-        recon_pts = outputs["gauss_means"]
-        cd, chamferDistance = 0.0, ChamferDistance()
-        if outputs["error"]:
-            print("cd error")
-            return cd
-        for bs, scale in enumerate(outputs[('depth_scale', 0)]):
-            scene_recon_pts = recon_pts[bs]
-            scene_pts = outputs["gt_points"][bs]
-            
-            # no bidirection here, cd should have direction
-            cd += chamferDistance(scene_recon_pts.unsqueeze(0), scene_pts.unsqueeze(0))
-            
-        return cd
-    
     def compute_bce_loss(self, outputs):
-        bce_loss, rec_iou, rest_iou = 0.0, 0.0, 0.0
+        bce_loss, rec_iou = 0.0, 0.0
         if outputs["error"]:
-            print("bce error")
-            return bce_loss, rec_iou, rest_iou
+            return bce_loss, rec_iou
         binary_logits, binary_voxels = outputs['binary_logits'], outputs['binary_voxel']
         # breakpoint()
         bce_loss = F.binary_cross_entropy_with_logits(binary_logits, binary_voxels, reduction="mean")
@@ -231,6 +212,10 @@ class Trainer(nn.Module):
             losses["loss/rec"] = rec_loss
             total_loss += rec_loss
 
+        if outputs["error"]:
+            print("** Model error, return zero loss **")
+            total_loss -= total_loss
+        
         losses["loss/total"] = total_loss
         return losses
     
@@ -266,9 +251,9 @@ class Trainer(nn.Module):
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
-                frame_ids = self.model.module.all_frame_ids(inputs)[:4]
+                frame_ids = self.model.module.all_frame_ids(inputs)[:3]
             else:
-                frame_ids = self.model.all_frame_ids(inputs)[:4]
+                frame_ids = self.model.all_frame_ids(inputs)[:3]
                 
             rec_loss = 0
             for frame_id in frame_ids:
@@ -281,6 +266,10 @@ class Trainer(nn.Module):
             rec_loss /= len(frame_ids)
             losses["loss/rec"] = rec_loss
             total_loss += rec_loss
+
+        if outputs["error"]:
+            print("** Model error, return zero loss **")
+            total_loss -= total_loss
 
         losses["loss/total"] = total_loss
         return losses

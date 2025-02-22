@@ -9,7 +9,7 @@ from einops import rearrange
 from models.encoder.layers import BackprojectDepth
 from models.decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from misc.util import add_source_frame_id
-from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac
+from misc.depth import estimate_depth_scale, estimate_depth_scale_ransac, estimate_depth_scale_by_depthmap
 
 from IPython import embed
 
@@ -157,7 +157,7 @@ class GaussianPredictor(nn.Module):
             else:
                 outputs[("cam_T_cam", f_i, 0)] = T_0_inv @ T_i
 
-
+        outputs["error"] = False
         if cfg.dataset.scale_pose_by_depth:
             B = cfg.data_loader.batch_size
             depth_padded = outputs[("depth", 0)].detach()
@@ -174,10 +174,13 @@ class GaussianPredictor(nn.Module):
                 if ("scale_colmap", 0) in inputs.keys():
                     scale = inputs[("scale_colmap", 0)][k]
                 else:
-                    if self.is_train():
-                        scale = estimate_depth_scale(depth_k, sparse_depth_k)
-                    else:
-                        scale = estimate_depth_scale_ransac(depth_k, sparse_depth_k)
+                    scale, error = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
+                    outputs["error"] = error or outputs["error"]
+                    # if self.is_train():
+                    #     scale, error = estimate_depth_scale(depth_k, sparse_depth_k)
+                    #     outputs["error"] = outputs["error"] or error
+                    # else:
+                    #     scale = estimate_depth_scale_ransac(depth_k, sparse_depth_k)
                 scales.append(scale)
             scale = torch.tensor(scales, device=depth.device).unsqueeze(dim=1)
             outputs[("depth_scale", 0)] = scale

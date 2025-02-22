@@ -11,7 +11,7 @@ config:
   file: "config.yaml"
 
 data_loader:
-  batch_size: 4
+  batch_size: 1
   num_workers: 16
 
 train:
@@ -30,7 +30,7 @@ train:
     beta: 0.9999
 
 optimiser:
-  learning_rate: 1e-4 #1e-4
+  learning_rate: 25e-6 #1e-4
   num_epochs: 20
   scheduler_lambda_step_size: 500000
   weight_decay: 1e-4 # 1e-2 1e-4
@@ -38,7 +38,7 @@ optimiser:
   mode: cosine
   num_warmup_steps: 0
   warmup_ratio: 1.0
-  max_training_steps: 200000
+  max_training_steps: 240000
   min_lr_ratio: 0.1
   grad_clip: false
   max_norm: 1
@@ -49,7 +49,7 @@ run:
   debug: false
   random_seed: 42
   git_hash: null
-  log_frequency: 100
+  log_frequency: 5000
   save_frequency: 5000
   val_frequency: 5000
   num_keep_ckpts: 5

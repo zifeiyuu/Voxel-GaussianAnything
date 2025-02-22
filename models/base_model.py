@@ -105,7 +105,8 @@ class BaseModel(nn.Module):
                 for k in range(B):
                     depth_k = depth[[k * self.cfg.model.gaussians_per_pixel], ...]
                     sparse_depth_k = sparse_depth[k]
-                    scale = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
+                    scale, error = estimate_depth_scale_by_depthmap(depth_k, sparse_depth_k)
+                    outputs["error"] = error or outputs["error"]
                     scales.append(scale)
                 scale = torch.tensor(scales, device=depth.device).unsqueeze(dim=1)
                 outputs[("depth_scale", f_i)] = scale
@@ -119,6 +120,10 @@ class BaseModel(nn.Module):
                     T = outputs[("cam_T_cam", f_i, 0)]
                     T[:, :3, 3] = T[:, :3, 3] * scale
                     outputs[("cam_T_cam", f_i, 0)] = T
+
+            if outputs["error"]:
+                print("Warning: No valid depth values found! GT depth map has problem")
+
                 
 
     

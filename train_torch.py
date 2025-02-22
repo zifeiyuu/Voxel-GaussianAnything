@@ -91,7 +91,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                     trainer.validate(model_eval, evaluator, val_loader, device='cuda')
 
         # Clean up and free GPU memory
-        if early_phase or step % cfg.run.val_frequency == 0 or step % 50 == 0:
+        if early_phase or step % cfg.run.val_frequency == 0 or step % 50 == 0 or outputs["error"]:
             torch.cuda.empty_cache()
 
         trainer.step += 1 # Account for fractional steps
@@ -197,6 +197,9 @@ def main(cfg: DictConfig):
         trainer.step = start_step
         print(f"Train using existing checkpoint from {cfg.ckpt_path}")
     trainer.model = ddp_model
+
+    # for name, param in trainer.model.named_parameters():
+    #     print(f"{name}, {param.dtype}")
 
     # Set up dataset
     train_dataset, train_loader = create_datasets(cfg, split="train", start_step=start_step)

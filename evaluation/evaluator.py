@@ -33,6 +33,10 @@ class Evaluator(nn.Module):
     
     def forward(self, img_pred, img_gt):
         b, c, h, w = img_gt.shape
+        if torch.isnan(img_pred).any() or torch.isnan(img_gt).any():
+            print("Detected NaN values in the input tensors.")
+            img_pred = torch.nan_to_num(img_pred, nan=0.0)
+            img_gt = torch.nan_to_num(img_gt, nan=0.0)
 
         if self.crop_border:
             margin = 0.05

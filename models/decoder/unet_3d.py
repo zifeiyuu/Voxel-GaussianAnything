@@ -19,6 +19,7 @@ from fvdb.nn import VDBTensor
 from torch_scatter import scatter_mean
 from IPython import embed
 from pdb import set_trace
+from torch.cuda.amp import autocast
 
 class depth_wrapper(nn.Module):
     def __init__(self, module):
