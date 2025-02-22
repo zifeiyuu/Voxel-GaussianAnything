@@ -7,7 +7,7 @@ defaults:
   - loss: [reconstruction, regularization]  # reconstruction, regularization
 
 config:
-  exp_name: "soft+scale5" 
+  exp_name: "debugg" 
   file: "gat_config.yaml"
 
 data_loader:

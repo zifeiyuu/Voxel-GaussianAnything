@@ -10,7 +10,7 @@ import collections
 import copy
 import cv2
 from .encoder.moge_encoder import MoGe_MVEncoder
-from .encoder.voxel_encoder import prepare_voxel_features_scatter_mean, HardVFE, compute_voxel_coors_and_centers
+from .encoder.voxel_encoder import prepare_voxel_features_scatter_mean, prepare_hard_vfe_inputs_scatter_fast, HardVFE, compute_voxel_coors_and_centers
 from .decoder.gauss_util import focal2fov, getProjectionMatrix, K_to_NDC_pp, render_predicted
 from .base_model import BaseModel
 from .heads.gat_head import LinearHead
@@ -62,8 +62,9 @@ class GATModel(BaseModel):
 
         self.voxel_size, self.pc_range, self.coarse_voxel_size = cfg.model.voxel_size, cfg.model.pc_range, cfg.model.coarse_voxel_size
         self.voxel_size_factor = cfg.model.coarse_voxel_size / cfg.model.voxel_size
-        # self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[cfg.model.voxel_feat_dim, cfg.model.voxel_feat_dim], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
-        # self.parameters_to_train += [{"params": self.vfe.parameters()}]
+
+        self.vfe = HardVFE(in_channels=cfg.model.backbone.pts_feat_dim+3+3, feat_channels=[cfg.model.voxel_feat_dim, cfg.model.voxel_feat_dim], voxel_size=(self.voxel_size, self.voxel_size, self.voxel_size), point_cloud_range=self.pc_range)
+        self.parameters_to_train += [{"params": self.vfe.parameters()}]
 
         if self.binary_predictor:
             self.vox_pred = VoxPredictor(cfg)
@@ -109,11 +110,10 @@ class GATModel(BaseModel):
             return coarse_rest_coors, torch.ones(0, 1, dtype=src_coors.dtype, device=src_coors.device), torch.ones(0, 3, dtype=src_coors.dtype, device=src_coors.device) # , torch.ones(1, 3, dtype=src_coors.dtype, device=src_coors.device)
 
         # Convert coarse coors to fine
-
-        fine_offsets = torch.tensor([
-            [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1],  [0, 0, -1], 
-            [0, 0, 0]  
-        ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
+        # fine_offsets = torch.tensor([
+        #     [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1],  [0, 0, -1], 
+        #     [0, 0, 0]  
+        # ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
 
         # Use 8 corners + center
         # fine_offsets = torch.tensor([
@@ -121,7 +121,9 @@ class GATModel(BaseModel):
         #     [-1, -1, 1],  [1, -1, 1],  [-1, 1, 1],  [1, 1, 1], 
         #     [0, 0, 0]  
         # ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
-        # fine_offsets = torch.tensor([[0, 0, 0]], device=rest_coors.device)
+
+        # just original position
+        fine_offsets = torch.tensor([[0, 0, 0]], device=coarse_rest_coors.device)
 
         rest_coors, rest_fine_confidence = self.upsample_voxel_coords(coarse_rest_coors, src_coors, fine_offsets, pred_confidence)   # input rest coors is coarse, src_coors is fine
 
@@ -276,12 +278,12 @@ class GATModel(BaseModel):
             pts_enc_feat = outputs[('pts_feat', 0)][b]
             pts_rgb = outputs[('pts_rgb', 0)][b]
             pts_xyz = outputs[("pts3d", 0)][b]
-            pts_feat = torch.cat([pts_enc_feat, pts_rgb], dim=-1)
+            # pts_feat = torch.cat([pts_enc_feat, pts_rgb], dim=-1)
 
             # ONLY SRC VIEW VOXELS HERE
-            voxels_features, coors, _ = prepare_voxel_features_scatter_mean(pts_xyz, pts_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
-            # features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(gt_points_dict[b][0], pts_enc_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
-            # voxels_features = self.vfe(features, num_points, coors)      
+            # voxels_features, coors, _ = prepare_voxel_features_scatter_mean(pts_xyz, pts_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts_xyz, pts_enc_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
+            voxels_features = self.vfe(features, num_points, coors)      
 
             if self.binary_predictor:
                 # # SRC + NOVEL VIEW VOXELS(PREDICTED)

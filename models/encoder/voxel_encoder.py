@@ -5,6 +5,7 @@ from torch import Tensor, nn
 
 import torch
 from torch_scatter import scatter_mean
+from pdb import set_trace
 
 def compute_voxel_coors_and_centers(
     pts3d: torch.Tensor,      # (N, 3)
@@ -64,6 +65,106 @@ def compute_voxel_coors_and_centers(
     
     return coors, voxel_centers
 
+
+def prepare_hard_vfe_inputs_scatter_fast(
+    pts3d: torch.Tensor,      # (N, 3)
+    pts_feat: torch.Tensor,   # (N, D)    
+    pts_rgb: torch.Tensor,    # (N, 3)
+    voxel_size: float = 0.02,
+    point_cloud_range=(0, 0, 0, 0, 0, 0),
+    max_points: int = 5
+):
+    """
+    将点云坐标、特征、颜色打包到 [M, max_points, C] 的张量里
+    并返回:
+       features:   (M, max_points, C)  其中 C = 3(xyz) + D(特征) + 3(rgb)
+       num_points: (M, )              每个voxel中的实际点数 (未截断)
+       coors:      (M, 4)            [batch_idx, z, y, x] 的体素坐标
+    """
+    device = pts3d.device
+    N = pts3d.size(0)
+    # 1) 计算体素坐标
+    grid_min = torch.tensor(point_cloud_range[:3], dtype=torch.float32, device=device)
+    grid_max = torch.tensor(point_cloud_range[3:], dtype=torch.float32, device=device)
+    voxel_indices = torch.floor((pts3d - grid_min) / voxel_size).long()  # (N, 3)
+
+    # 2) 筛选出范围内的点
+    voxel_dims = ((grid_max - grid_min) / voxel_size).long()  # x,y,z 每个最多的体素数量
+    mask_min = (voxel_indices >= 0).all(dim=1)
+    mask_max = (voxel_indices < voxel_dims).all(dim=1)
+    valid_mask = mask_min & mask_max
+
+    pts3d       = pts3d[valid_mask]
+    pts_feat    = pts_feat[valid_mask]
+    pts_rgb     = pts_rgb[valid_mask]
+    voxel_indices = voxel_indices[valid_mask]
+
+    # 3) 为体素分配一个哈希
+    #    这里约定: voxel_hash = z * 1e6 + y * 1e3 + x
+    #    注意 x=voxel_indices[:,0], y=1, z=2 (与 HardVFE 的 coors[:,1]~3 对应)
+    voxel_hash = (
+          voxel_indices[:, 2] * 10**6  # z
+        + voxel_indices[:, 1] * 10**3  # y
+        + voxel_indices[:, 0]         # x
+    )
+
+    # 4) 找到去重后的哈希，以及每个点对应的 voxel_id
+    unique_voxel_hash, inverse_indices = torch.unique(voxel_hash, return_inverse=True)
+    M = unique_voxel_hash.size(0)  # 体素数
+
+    # 拼接点特征: [x, y, z, feat..., rgb...]
+    scatter_features = torch.cat([pts3d, pts_feat, pts_rgb], dim=1)  # (N_valid, C)
+    C = scatter_features.size(1)
+
+    # --------------- 核心加速步骤 --------------
+    # Step A: 按照 voxel_id (即 inverse_indices) 排序，分组放在一起
+    sorted_indices = torch.argsort(inverse_indices)            # (N_valid, )
+    sorted_voxel_ids = inverse_indices[sorted_indices]         # 体素ID 已按升序排列
+    sorted_features = scatter_features[sorted_indices]         # (N_valid, C)
+
+    # Step B: 计算每个点在本体素内的“偏移量 offset”
+    #   1) 先给每组打 group_id (0 ~ M-1)
+    #      diff[i] 表示 sorted_voxel_ids[i] 与前一个是否不一样
+    #      然后 cumsum 就得到一个组号 group_id[i]。
+    diff = (sorted_voxel_ids[1:] != sorted_voxel_ids[:-1])
+    group_id = torch.zeros_like(sorted_voxel_ids)
+    if group_id.numel() > 1:
+        group_id[1:] = diff.cumsum(dim=0)
+    #   2) 计算每个 group 的第一个全局索引 => group_min[g] = 该组在 sorted_voxel_ids 里出现的第一个下标
+    idx_arange = torch.arange(group_id.size(0), device=device)
+    group_min, _ = scatter_min(idx_arange, group_id, dim=0, dim_size=M)
+    #   3) offset = 当前下标 - 本组起始下标 => 即组内位置
+    offsets = idx_arange - group_min[group_id]
+    #   4) clamp offset 到 max_points-1
+    offsets_clamped = offsets.clamp_max(max_points - 1)
+
+    # Step C: 一次性写入 [M, max_points, C]
+    features = torch.zeros((M, max_points, C), dtype=torch.float32, device=device)
+    features[group_id.long(), offsets_clamped.long()] = sorted_features
+
+    # Step D: 统计每个 voxel 的实际点数 (未截断)
+    #         如果只想要“截断后”的点数，可以再 clamp 一下，但 HardVFE 通常需要真实数量
+    ones = torch.ones_like(group_id, dtype=torch.int32)
+    num_points = scatter_add(ones, group_id, dim=0, dim_size=M)
+    # num_points_clamped = num_points.clamp(max=max_points) # 若你只想要截断后的计数，可以再做这一步
+
+    # 5) 反推 x,y,z，用于构造 coors (batch=0)
+    z = (unique_voxel_hash // 10**6).long()
+    yz = (unique_voxel_hash % 10**6).long()
+    y = (yz // 10**3).long()
+    x = (yz % 10**3).long()
+
+    batch_idx = torch.zeros_like(z, dtype=torch.long)
+    # HardVFE 的惯例: coors[:,0]=batch_idx, coors[:,1]=z, coors[:,2]=y, coors[:,3]=x
+    coors = torch.stack([batch_idx, z, y, x], dim=1)  # (M,4)
+    
+    voxel_centers = torch.stack([
+        x.float() * voxel_size + grid_min[0] + voxel_size / 2,
+        y.float() * voxel_size + grid_min[1] + voxel_size / 2,
+        z.float() * voxel_size + grid_min[2] + voxel_size / 2
+    ], dim=1)  # [M, 3]
+
+    return features, num_points, coors, voxel_centers
 
 
 def prepare_voxel_features_scatter_mean(

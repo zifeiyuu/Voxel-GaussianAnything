@@ -560,6 +560,8 @@ class Modified3DUnet(nn.Module):
         elif free_space == "soft-5":
             # free space [-5, 6]
             rel_pos = (torch.sigmoid(_rel_xyz) * 11 - 5) * grid.voxel_sizes[0]
+        elif free_space == "soft-x":
+            rel_pos = (torch.sigmoid(_rel_xyz) * 13 - 6) * grid.voxel_sizes[0]
         elif free_space == "tanh-3":
             # free space [-2.5, 3.5]
             rel_pos = (torch.tanh(_rel_xyz) * 3 + 0.5) * grid.voxel_sizes[0]
