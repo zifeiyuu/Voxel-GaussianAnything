@@ -177,13 +177,18 @@ def evaluate(model, cfg, evaluator, dataloader, device=None, save_vis=False, out
                     plt.imsave(total_image_path, total_image)
                     spliced_images_list = []
 
+
             for f_id in score_dict.keys():
+                error = False                
                 pred = outputs[('color_gauss', f_id, 0)]
                 gt = inputs[('color', f_id, 0)]  # Output is directly from input
                 # Should work in for B>1, however, be careful of reduction
+                if torch.isnan(pred).any() or torch.isnan(gt).any():
+                    error = True
                 out = evaluator(pred, gt)
-                for metric_name, v in out.items():
-                    score_dict[f_id][metric_name].append(v)
+                if not error:
+                    for metric_name, v in out.items():
+                        score_dict[f_id][metric_name].append(v)
 
             if cfg.model.binary_predictor:
                 # calculate iou 

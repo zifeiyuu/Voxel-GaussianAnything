@@ -1,6 +1,6 @@
 gauss_max_scale:
   weight: 0.001
-  thresh: 3.0
+  thresh: 2.0
 
 gauss_min_scale:
   weight: 0
@@ -9,7 +9,7 @@ gauss_min_scale:
 
 gauss_offset:
   weight: 0.01
-  thresh: 2.0
+  thresh: 0.4
 
 soft_cd:
   weight: -1 # 1e-6

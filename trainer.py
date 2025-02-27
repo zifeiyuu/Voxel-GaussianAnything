@@ -181,17 +181,29 @@ class Trainer(nn.Module):
                 losses["loss/big_gauss_reg_loss"] = big_gauss_reg_loss / B
                 total_loss += big_g_lmbd * big_gauss_reg_loss / B
 
-            # regularize too small gaussians
-            if (small_g_lmbd := cfg.loss.gauss_min_scale.weight) > 0:
-                small_gauss_reg_loss = 0
-                for b in range(B):
-                    scaling = outputs["gauss_scaling"][b]
-                    small_gaussians = torch.where(scaling < cfg.loss.gauss_min_scale.single_thresh)
-                    if len(small_gaussians[0]) > 0:
-                        small_gauss_reg_loss += torch.mean(scaling[small_gaussians])
+            # # regularize too small gaussians
+            # if (small_g_lmbd := cfg.loss.gauss_min_scale.weight) > 0:
+            #     small_gauss_reg_loss = 0
+            #     for b in range(B):
+            #         scaling = outputs["gauss_scaling"][b]
+            #         small_gaussians = torch.where(scaling < cfg.loss.gauss_min_scale.single_thresh)
+            #         if len(small_gaussians[0]) > 0:
+            #             small_gauss_reg_loss += torch.mean(scaling[small_gaussians])
 
-                losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss / B
-                total_loss += small_g_lmbd * small_gauss_reg_loss / B
+            #     losses["loss/small_gauss_reg_loss"] = small_gauss_reg_loss / B
+            #     total_loss += small_g_lmbd * small_gauss_reg_loss / B
+                
+            # regularize too big offset
+            if cfg.model.predict_offset and (offs_lmbd := cfg.loss.gauss_offset.weight) > 0:
+                big_offset_reg_loss = 0
+                for b in range(B):
+                    offset = outputs["gauss_offset"][b]
+                    big_offset = torch.where(offset**2 > cfg.loss.gauss_offset.thresh**2)
+                    if len(big_offset[0]) > 0:
+                        big_offset_reg_loss += torch.mean(offset[big_offset]**2)
+
+                losses["loss/gauss_offset_reg"] = big_offset_reg_loss / B
+                total_loss += offs_lmbd * big_offset_reg_loss / B
 
             # reconstruction loss
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
@@ -315,6 +327,8 @@ class Trainer(nn.Module):
         logger.add_scalar(f"{mode}/grad_norm", outputs['grad_norm'], self.step)
 
         for l, v in losses.items():
+            if isinstance(v, torch.Tensor) and v.dtype == torch.bfloat16:
+                v = v.to(torch.float)
             logger.add_scalar(f"{mode}/{l}", v, self.step)
 
         if cfg.model.gaussian_rendering:

@@ -1,6 +1,6 @@
 # @package _global_
 config:
-  exp_name: gat_test
+  exp_name: new_gat_test
 
 defaults:
   - override /dataset: arkitscenes # arkitscenes scannetpp
@@ -15,7 +15,7 @@ train:
   use_gt_poses: true
   load_weights_folder: true
 
-ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/soft+scale5/gsm/ckpt
+ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/vfe_free/gsm/ckpt
 save_vis: false
 
 model:

@@ -1,6 +1,6 @@
 # @package _global_
 config:
-  exp_name: train_flash3d_scannetpp
+  exp_name: frame3_flash3d_scannetpp
 
 defaults:
   - override /dataset: scannetpp # scannetpp arkitscenes

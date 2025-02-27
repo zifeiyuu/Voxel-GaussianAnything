@@ -91,7 +91,7 @@ def run_epoch(trainer: Trainer, ema, train_loader, val_loader, optimiser, lr_sch
                     trainer.validate(model_eval, evaluator, val_loader, device='cuda')
 
         # Clean up and free GPU memory
-        if early_phase or step % cfg.run.val_frequency == 0 or step % 50 == 0 or outputs["error"]:
+        if early_phase or step % cfg.run.val_frequency == 0 or step % 100 == 0 or outputs["error"]:
             torch.cuda.empty_cache()
 
         trainer.step += 1 # Account for fractional steps
@@ -130,24 +130,39 @@ def main(cfg: DictConfig):
     if local_rank == 0:
         trainer.set_logger(cfg)
     model = trainer.model
-
+    
     # Wrap model in DDP
     ddp_model = torch.nn.parallel.DistributedDataParallel(
         model.to(local_rank), device_ids=[local_rank], find_unused_parameters=True)
-    
+
     # set up optimiser
-    optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)
+    optimiser = optim.Adam(model.parameters_to_train, cfg.optimiser.learning_rate)    
 
     num_warmup_steps = cfg.optimiser.num_warmup_steps
     max_training_steps = cfg.optimiser.max_training_steps
     min_lr_ratio = cfg.optimiser.min_lr_ratio
 
+    start_step = 0
+    # Load model from checkpoint
+    if (ckpt_dir := model.checkpoint_dir()).exists():
+        model.load_model(ckpt_dir, optimiser=optimiser)
+        print(f"Resume training using checkpoint from {ckpt_dir}")
+    elif cfg.train.load_weights_folder:
+        device = device = torch.device('cuda', local_rank) 
+        model.load_model(cfg.ckpt_path, optimiser=optimiser, device=device)
+        model.step = model.step + 1 # model.step + 1
+        start_step = model.step
+        trainer.step = start_step
+        print(f"Train using existing checkpoint from {cfg.ckpt_path}")
+        
     if cfg.optimiser.mode == 'cosine':
         lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
             optimiser,
             T_max=max_training_steps,  # sets the period of the cosine cycle
             eta_min= min_lr_ratio * cfg.optimiser.learning_rate  # sets the minimum learning rate
         )
+        if cfg.train.load_weights_folder:
+            lr_scheduler.last_epoch = model.step
     elif cfg.optimiser.mode == 'linear':
         def lr_linear(num_warmup_steps, num_training_steps, min_lr_ratio=0):
             def lr_lambda(current_step):
@@ -162,6 +177,8 @@ def main(cfg: DictConfig):
             optimiser, 
             lr_linear(num_warmup_steps, max_training_steps, min_lr_ratio)
         )
+        if cfg.train.load_weights_folder:
+            lr_scheduler.last_epoch = model.step
     else:
         def lr_lambda(*args):
             threshold = cfg.optimiser.scheduler_lambda_step_size
@@ -172,7 +189,9 @@ def main(cfg: DictConfig):
         lr_scheduler = optim.lr_scheduler.LambdaLR(
             optimiser, lr_lambda
         )
-    
+        if cfg.train.load_weights_folder:
+            lr_scheduler.last_epoch = model.step
+
     # Set up Exponential Moving Average (EMA)
     if cfg.train.ema.use: 
         ema = EMA(
@@ -184,18 +203,6 @@ def main(cfg: DictConfig):
     else:
         ema = None
 
-    start_step = 0
-    # Load model from checkpoint
-    if (ckpt_dir := model.checkpoint_dir()).exists():
-        model.load_model(ckpt_dir, optimiser=optimiser)
-        print(f"Resume training using checkpoint from {ckpt_dir}")
-    elif cfg.train.load_weights_folder:
-        device = device = torch.device('cuda', local_rank) 
-        model.load_model(cfg.ckpt_path, optimiser=optimiser, device=device)
-        model.step = model.step + 1 # model.step + 1
-        start_step = model.step
-        trainer.step = start_step
-        print(f"Train using existing checkpoint from {cfg.ckpt_path}")
     trainer.model = ddp_model
 
     # for name, param in trainer.model.named_parameters():

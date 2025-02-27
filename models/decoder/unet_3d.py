@@ -668,6 +668,7 @@ class Modified3DUnet(nn.Module):
         scaling_list = []
         rotation_list = []
         feat_dc_list = []
+        offset_list = []
         if self.with_render_branch:
             if x.grid.total_voxels > 0:
                 h, w = img_features_batch.shape[3:5]
@@ -711,7 +712,7 @@ class Modified3DUnet(nn.Module):
 
                     occ_voxel_hybrid_feature = torch.cat([occ_voxel_2D_feature, occ_voxel_3D_feature], dim=1)
                     occ_render_feature = self.render_head_hybrid(VDBTensor(cur_occ_grid, cur_occ_grid.jagged_like(occ_voxel_hybrid_feature)))
-                    occ_abs_pos, occ_scaling, occ_rotation, occ_opacity, occ_color = self.feature2gs(cur_occ_grid, occ_render_feature.data.jdata, gs_free_space=self.gs_free_space, max_scaling=self.max_scaling)
+                    occ_abs_pos, occ_scaling, occ_rotation, occ_opacity, occ_color, offsets = self.feature2gs(cur_occ_grid, occ_render_feature.data.jdata, gs_free_space=self.gs_free_space, max_scaling=self.max_scaling)
 
                     # non_occ_render_feature = self.render_head_3D(VDBTensor(cur_occ_grid, cur_occ_grid.jagged_like(occ_voxel_3D_feature)))
                     # abs_pos, scaling, rotation, opacity, color = self.feature2gs(cur_occ_grid, non_occ_render_feature.data.jdata, gs_free_space=self.gs_free_space, max_scaling=self.max_scaling)
@@ -733,8 +734,9 @@ class Modified3DUnet(nn.Module):
                     rotation_list.append(occ_rotation)
                     opacity_list.append(occ_opacity)
                     feat_dc_list.append(occ_color)    
+                    offset_list.append(offsets)
 
-        return position_list, opacity_list, scaling_list, rotation_list, feat_dc_list
+        return position_list, opacity_list, scaling_list, rotation_list, feat_dc_list, offset_list
     
     def feature2gs(self, grid, feature, gs_free_space= "hard", max_scaling = 1):
         """split the gaussian parameters (default)
@@ -765,7 +767,7 @@ class Modified3DUnet(nn.Module):
         color_dim = self.gs_dim - 11
         color = _color.view(-1, color_dim) # rgb or feature
 
-        return abs_pos.float(), scaling, rotation, opacity, color.unsqueeze(1) # for rasterizer
+        return abs_pos.float(), scaling, rotation, opacity, color.unsqueeze(1), rel_pos # for rasterizer
     
     def forward(self, coors, padding_coors, voxel_sizes, origins, voxel_features, img_features, camera_pose, intrinsics, depths, padding_confidence):
         # coors list[N, 3]
@@ -829,12 +831,12 @@ class Modified3DUnet(nn.Module):
         # build a hash tree
         hash_tree = self.build_normal_hash_tree(x.grid)
         res, x, encoder_features = self.encode(x, hash_tree)
-        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.decode(res, x, hash_tree, encoder_features, padded_img_features, camera_pose, padded_intrinsics)
+        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list, offset_list = self.decode(res, x, hash_tree, encoder_features, padded_img_features, camera_pose, padded_intrinsics)
         
         del padded_img_features
         del padded_intrinsics
 
-        return position_list, opacity_list, scaling_list, rotation_list, feat_dc_list
+        return position_list, opacity_list, scaling_list, rotation_list, feat_dc_list, offset_list
 
 
 class Lifter(nn.Module):
@@ -937,7 +939,5 @@ class Lifter(nn.Module):
     def forward(self, grid, camera_pose, padded_intrinsics, padded_img_features, depths, padding_confidence):
         # img_features = torch.cat([img_features, depths], dim=2)
         voxel_features = self.build_ray_casting_feature(grid, camera_pose, padded_intrinsics, padded_img_features)
-        for b in range(len(voxel_features)):
-            voxel_features[b] = torch.cat([voxel_features[b], padding_confidence[b]], dim=-1)
         voxel_features = [self.mix_fc(feature) for feature in voxel_features]
         return voxel_features

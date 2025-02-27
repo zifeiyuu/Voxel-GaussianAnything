@@ -1,6 +1,6 @@
 # @package _global_
 config:
-  exp_name: b_flash3d_scannetpp
+  exp_name: flash3d_scannetpp_2
 
 defaults:
   - override /dataset: arkitscenes # scannetpp arkitscenes
@@ -11,14 +11,14 @@ optimiser:
   scheduler_lambda_step_size: 500000
 
 data_loader:
-  batch_size: 16
+  batch_size: 1
 
 train:
   scale_pose_by_depth: true
   use_gt_poses: true
   load_weights_folder: true
 
-ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/exp/re10k_v2/checkpoints # /mnt/ziyuxiao/code/GaussianAnything/output/flash3d_scannetpp/gsm/ckpt # /mnt/ziyuxiao/code/GaussianAnything/exp/re10k_v2/checkpoints
+ckpt_path: /mnt/ziyuxiao/code/GaussianAnything/output/frame3_flash3d_scannetpp/gsm/ckpt # /mnt/ziyuxiao/code/GaussianAnything/output/flash3d_scannetpp/gsm/ckpt # /mnt/ziyuxiao/code/GaussianAnything/exp/re10k_v2/checkpoints
 save_vis: false
 
 model:

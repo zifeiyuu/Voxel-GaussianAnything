@@ -68,7 +68,6 @@ class GATModel(BaseModel):
 
         if self.binary_predictor:
             self.vox_pred = VoxPredictor(cfg)
-            # self.vox_pred.to(dtype=torch.bfloat16)
             self.parameters_to_train += self.vox_pred.get_parameter_groups()
             
 
@@ -80,7 +79,7 @@ class GATModel(BaseModel):
         # WARNING! This function only take bs=1 input, i.e., the first dim of coords should always be zero
         assert src_coors[..., 0].sum() == 0
 
-        pred_binary_canvas = (pred_confidence.sigmoid() > 0.5).float()
+        pred_binary_canvas = (pred_confidence.sigmoid() > 0.5)
 
         upsampling_factor = self.coarse_voxel_size / self.voxel_size 
 
@@ -91,41 +90,41 @@ class GATModel(BaseModel):
             int(abs(self.pc_range[2] - self.pc_range[5]) / self.coarse_voxel_size)
         )
         coarse_binary_canvas = torch.zeros(1, coarse_canvas_size[2], coarse_canvas_size[1], coarse_canvas_size[0], 
-                                        dtype=src_coors.dtype, device=src_coors.device)
+                                        dtype=torch.bool, device=src_coors.device)
 
         # Convert fine voxel indices to coarse voxel indices
         coarse_src_coors = src_coors.clone()
-        coarse_src_coors[:, 1:] = (coarse_src_coors[:, 1:] / upsampling_factor).round().long()
+        coarse_src_coors[:, 1:] = (coarse_src_coors[:, 1:] / upsampling_factor).round().int()
         max_x, max_y, max_z = coarse_binary_canvas.shape[-1], coarse_binary_canvas.shape[-2], coarse_binary_canvas.shape[-3]
         # Ensure indices are within valid bounds
         coarse_src_coors[:, 1] = coarse_src_coors[:, 1].clamp(min=0, max=max_z - 1)
         coarse_src_coors[:, 2] = coarse_src_coors[:, 2].clamp(min=0, max=max_y - 1)
         coarse_src_coors[:, 3] = coarse_src_coors[:, 3].clamp(min=0, max=max_x - 1)
-        coarse_binary_canvas[:, coarse_src_coors[:, 1], coarse_src_coors[:, 2], coarse_src_coors[:, 3]] = 1
+        coarse_binary_canvas[:, coarse_src_coors[:, 1], coarse_src_coors[:, 2], coarse_src_coors[:, 3]] = True
 
-        rest_binary_canvas = (pred_binary_canvas - coarse_binary_canvas).clamp(min=0)
+        rest_binary_canvas = pred_binary_canvas & (coarse_binary_canvas == False)
         coarse_rest_coors = torch.nonzero(rest_binary_canvas)
 
         if coarse_rest_coors.numel() == 0:  
-            return coarse_rest_coors, torch.ones(0, 1, dtype=src_coors.dtype, device=src_coors.device), torch.ones(0, 3, dtype=src_coors.dtype, device=src_coors.device) # , torch.ones(1, 3, dtype=src_coors.dtype, device=src_coors.device)
+            rest_coors = coarse_rest_coors
+        else: 
+            # Convert coarse coors to fine
+            # fine_offsets = torch.tensor([
+            #     [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1],  [0, 0, -1], 
+            #     [0, 0, 0]  
+            # ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
 
-        # Convert coarse coors to fine
-        # fine_offsets = torch.tensor([
-        #     [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1],  [0, 0, -1], 
-        #     [0, 0, 0]  
-        # ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
+            # Use 8 corners + center
+            # fine_offsets = torch.tensor([
+            #     [-1, -1, -1], [1, -1, -1], [-1, 1, -1], [1, 1, -1],
+            #     [-1, -1, 1],  [1, -1, 1],  [-1, 1, 1],  [1, 1, 1], 
+            #     [0, 0, 0]  
+            # ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
 
-        # Use 8 corners + center
-        # fine_offsets = torch.tensor([
-        #     [-1, -1, -1], [1, -1, -1], [-1, 1, -1], [1, 1, -1],
-        #     [-1, -1, 1],  [1, -1, 1],  [-1, 1, 1],  [1, 1, 1], 
-        #     [0, 0, 0]  
-        # ], device=coarse_rest_coors.device) * (upsampling_factor // 2)
+            # just original position
+            fine_offsets = torch.tensor([[0, 0, 0]], dtype=torch.int, device=coarse_rest_coors.device)
 
-        # just original position
-        fine_offsets = torch.tensor([[0, 0, 0]], device=coarse_rest_coors.device)
-
-        rest_coors, rest_fine_confidence = self.upsample_voxel_coords(coarse_rest_coors, src_coors, fine_offsets, pred_confidence)   # input rest coors is coarse, src_coors is fine
+            rest_coors = self.upsample_voxel_coords(coarse_rest_coors, src_coors, fine_offsets)   # input rest coors is coarse, src_coors is fine
 
         grid_min = self.pc_range[:3]
         rest_voxel_centers = torch.stack([
@@ -134,9 +133,9 @@ class GATModel(BaseModel):
             rest_coors[:, -3].float() * self.voxel_size + grid_min[2] + self.voxel_size / 2,
         ], dim=1) 
 
-        return rest_coors, rest_fine_confidence, rest_voxel_centers
+        return rest_coors, rest_voxel_centers
     
-    def upsample_voxel_coords(self, coarse_rest_coors, src_coors, fine_offsets, pred_confidence):
+    def upsample_voxel_coords(self, coarse_rest_coors, src_coors, fine_offsets):
 
         upsampling_factor = self.coarse_voxel_size / self.voxel_size
 
@@ -145,7 +144,7 @@ class GATModel(BaseModel):
             int(abs(self.pc_range[1] - self.pc_range[4]) / self.voxel_size),
             int(abs(self.pc_range[2] - self.pc_range[5]) / self.voxel_size)
         )
-        fine_binary_canvas = torch.zeros(1, fine_canvas_size[2], fine_canvas_size[1], fine_canvas_size[0], dtype=coarse_rest_coors.dtype, device=coarse_rest_coors.device)
+        fine_binary_canvas = torch.zeros(1, fine_canvas_size[2], fine_canvas_size[1], fine_canvas_size[0], dtype=torch.bool, device=coarse_rest_coors.device)
 
         fine_offset_x = fine_offsets[:, 0]
         fine_offset_y = fine_offsets[:, 1]
@@ -154,30 +153,27 @@ class GATModel(BaseModel):
         max_x, max_y, max_z = fine_binary_canvas.shape[-1], fine_binary_canvas.shape[-2], fine_binary_canvas.shape[-3]
         # Repeat coarse voxel indices for each fine voxel inside it
         fine_rest_coors = coarse_rest_coors.repeat_interleave(fine_offset_x.shape[0], dim=0)
-        fine_rest_coors[:, -1] = (fine_rest_coors[:, -1] * upsampling_factor).round() + fine_offset_x.repeat(coarse_rest_coors.shape[0])
-        fine_rest_coors[:, -2] = (fine_rest_coors[:, -2] * upsampling_factor).round() + fine_offset_y.repeat(coarse_rest_coors.shape[0])
-        fine_rest_coors[:, -3] = (fine_rest_coors[:, -3] * upsampling_factor).round() + fine_offset_z.repeat(coarse_rest_coors.shape[0])
+        fine_rest_coors[:, -1] = (fine_rest_coors[:, -1] * upsampling_factor).round() + fine_offset_x.repeat(coarse_rest_coors.shape[0]) + upsampling_factor // 2
+        fine_rest_coors[:, -2] = (fine_rest_coors[:, -2] * upsampling_factor).round() + fine_offset_y.repeat(coarse_rest_coors.shape[0]) + upsampling_factor // 2
+        fine_rest_coors[:, -3] = (fine_rest_coors[:, -3] * upsampling_factor).round() + fine_offset_z.repeat(coarse_rest_coors.shape[0]) + upsampling_factor // 2
 
         # Clamp coordinates to be within valid bounds
         fine_rest_coors[:, 1] = fine_rest_coors[:, 1].clamp(min=0, max=max_z - 1)
         fine_rest_coors[:, 2] = fine_rest_coors[:, 2].clamp(min=0, max=max_y - 1)
         fine_rest_coors[:, 3] = fine_rest_coors[:, 3].clamp(min=0, max=max_x - 1)
 
-        coarse_confidence = pred_confidence[coarse_rest_coors[:, 0], coarse_rest_coors[:, 1], coarse_rest_coors[:, 2], coarse_rest_coors[:, 3]]
-        # Repeat the coarse confidence values to match fine coordinates
-        fine_confidence = coarse_confidence.repeat_interleave(fine_offsets.shape[0], dim=0)
-
         # Fill fine binary canvas
-        rest_binary_canvas = fine_binary_canvas.float()
-        # rest_binary_canvas = rest_binary_canvas.to(torch.bfloat16)
-        rest_binary_canvas[:, fine_rest_coors[:, 1], fine_rest_coors[:, 2], fine_rest_coors[:, 3]] = fine_confidence
-        fine_binary_canvas[:, src_coors[:, 1], src_coors[:, 2], src_coors[:, 3]] = 1
-        # ensure no overlap
-        rest_binary_canvas = rest_binary_canvas * (fine_binary_canvas == 0)
-        rest_coors = torch.nonzero(rest_binary_canvas)
-        fine_confidence = rest_binary_canvas[:, rest_coors[:, 1], rest_coors[:, 2], rest_coors[:, 3]].view(-1, 1)
+        rest_binary_canvas = fine_binary_canvas.clone()
+        rest_binary_canvas[:, fine_rest_coors[:, 1], fine_rest_coors[:, 2], fine_rest_coors[:, 3]] = True
+        fine_binary_canvas[:, src_coors[:, 1], src_coors[:, 2], src_coors[:, 3]] = True
 
-        return rest_coors, fine_confidence #rest_binary_canvas, (rest_binary_canvas + fine_binary_canvas).clamp(max=1)
+        del fine_rest_coors
+
+        # ensure no overlap
+        rest_binary_canvas = rest_binary_canvas & (fine_binary_canvas == False)
+        rest_coors = torch.nonzero(rest_binary_canvas)
+
+        return rest_coors 
     
     def get_projected_points(self, inputs, outputs):
         depth_error = False
@@ -210,7 +206,7 @@ class GATModel(BaseModel):
         coors, voxel_centers = compute_voxel_coors_and_centers(points, voxel_size=voxel_size, point_cloud_range=self.pc_range)
         
         canvs_size = (int(abs(self.pc_range[0] - self.pc_range[3]) / voxel_size), int(abs(self.pc_range[1] - self.pc_range[4]) / voxel_size), int(abs(self.pc_range[2] - self.pc_range[5]) / voxel_size))
-        binary_canvas = torch.zeros(1, canvs_size[2], canvs_size[1], canvs_size[0], dtype=coors.dtype, device=coors.device)
+        binary_canvas = torch.zeros(1, canvs_size[2], canvs_size[1], canvs_size[0], dtype=torch.bfloat16, device=coors.device)
 
         binary_canvas[:, coors[:,1], coors[:,2], coors[:,3]] = 1
 
@@ -283,64 +279,73 @@ class GATModel(BaseModel):
             # ONLY SRC VIEW VOXELS HERE
             # voxels_features, coors, _ = prepare_voxel_features_scatter_mean(pts_xyz, pts_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
             features, num_points, coors, voxel_centers = prepare_hard_vfe_inputs_scatter_fast(pts_xyz, pts_enc_feat, pts_rgb, voxel_size=self.voxel_size, point_cloud_range=self.pc_range)
-            voxels_features = self.vfe(features, num_points, coors)      
+            voxels_features = self.vfe(features, num_points, coors)  
+
+            # ############ avoid memory full
+            # max_points = 74000
+            # cur_points = voxels_features.shape[0]
+            # if cur_points > max_points:
+            #     outputs["error"] = True
+            #     coors = coors[:1, :]
+            #     voxels_features = voxels_features[:1, :]
+            #     gt_points[b] = gt_points[b][:1, :]
+            #     print(f"TO AVOID OUT OF MEMORY(PRED_VOXEL){cur_points}, SKIP THIS BATCH")
+            # ###############
 
             if self.binary_predictor:
                 # # SRC + NOVEL VIEW VOXELS(PREDICTED)
                 # coarse voxel predicted
-                # with autocast(dtype=torch.bfloat16):  
-                batch_binary_logits, gt_binary_voxel_single, coor = self.vox_pred(voxels_features, coors, max_pooling=True)  # batch_pred_feat (B, Z, Y, X, 64)
+                with autocast(dtype=torch.bfloat16):  
+                    batch_binary_logits, _, _ = self.vox_pred(voxels_features, coors, max_pooling=True)  # batch_pred_feat (B, Z, Y, X, 64)
                 # get gt corase voxel (fine)
                 gt_binary_voxel, _ = self.get_binary_voxels(gt_points[b], voxel_size=self.coarse_voxel_size)
-                gt_binary_voxel = gt_binary_voxel.float()
+
+                # ############ avoid memory full
+                # max_points = 65000
+                # cur_points = torch.nonzero(gt_binary_voxel > 0.5).shape[0]
+                # if cur_points > max_points:
+                #     outputs["error"] = True
+                #     coors = coors[:1, :]
+                #     voxels_features = voxels_features[:1, :]
+                #     gt_binary_voxel = torch.zeros_like(gt_binary_voxel)
+                #     print(f"TO AVOID OUT OF MEMORY(GT_VOXEL){cur_points}, SKIP THIS BATCH")
+                # ###############
+
+                padding_coors, padding_xyz = self.padding_voxel_feature(coors, batch_binary_logits)   # gt_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
                 
-                valid_voxels = (batch_binary_logits.sigmoid() > 0.5).float()
-                confidence_values = batch_binary_logits[valid_voxels > 0.5]
-                confidence_values = confidence_values.view(-1, 1)
+                # ############ avoid memory full
+                # max_points = 20000
+                # cur_points = padding_coors.shape[0]
+                # if cur_points > max_points:
+                #     outputs["error"] = True
+                #     coors = coors[:1, :]
+                #     voxels_features = voxels_features[:1, :]
+                #     gt_binary_voxel = torch.zeros_like(gt_binary_voxel)
+                #     padding_coors = padding_coors[:1, :]
+                #     print(f"TO AVOID OUT OF MEMORY(PADDING_VOXEL){cur_points}, SKIP THIS BATCH")
+                # ###############
 
-                padding_coors, padding_confidence, padding_xyz = self.padding_voxel_feature(coors, batch_binary_logits)   # gt_binary_voxel  (batch_binary_logits.sigmoid() > 0.5).float()
-
-                binary_voxel.append(gt_binary_voxel.float())
-                binary_logits.append(batch_binary_logits.float())
+                binary_voxel.append(gt_binary_voxel.to(torch.bfloat16))
+                binary_logits.append(batch_binary_logits.to(torch.bfloat16))
                 padding_coors_list.append(padding_coors[:, [3,2,1]].to(torch.int64))
-                padding_confidence_list.append(padding_confidence)
-                outputs["padding_points"].append(padding_xyz)
+                if not self.training:
+                    outputs["padding_points"].append(padding_xyz)
 
             coors_list.append(coors[:, [3,2,1]].to(torch.int64))   #zyx to xyz
             voxels_features_list.append(voxels_features)
-
-        ############ avoid memory full
-        # max_points_coor = 47000
-        # for p in coors_list:
-        #     if p.shape[0] > max_points_coor:
-        #         outputs["error"] = True
-                
-        # max_points_pad = 16e4
-        # for p in padding_coors_list:
-        #     if p.shape[0] > max_points_pad:
-        #         outputs["error"] = True
-
-        # if outputs["error"] == True:
-        #     for b in range(B):
-        #         coors_list[b] = coors_list[b][: 1]
-        #         voxels_features_list[b] = voxels_features_list[b][: 1]
-        #         padding_coors_list[b] = padding_coors_list[b][: 1]
-        #         padding_confidence_list[b] = padding_confidence_list[b][: 1]
-        #     print("TO AVOID OUT OF MEMORY, SKIP THIS BATCH")
-        #     torch.cuda.empty_cache()
-        ###############
 
         K_6d = self.intrinsic_matrix_to_6d(inputs[("K_src", 0)], H, W)
         img_features = rearrange(torch.cat([outputs[('pts_feat', 0)], outputs[('pts_rgb', 0)]], dim=-1).unsqueeze(1), "b n (h w) c -> b n c h w", h=H, w=W)
         #3D UNET
         # breakpoint()
-        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list = self.unet3d(coors_list, padding_coors_list, [self.voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_6d, outputs[("depth_pred", 0)].unsqueeze(1), padding_confidence_list)
+        position_list, opacity_list, scaling_list, rotation_list, feat_dc_list, offset_list = self.unet3d(coors_list, padding_coors_list, [self.voxel_size]*3, self.pc_range[0:3], voxels_features_list, img_features, outputs[("cam_T_cam", 0, 0)].unsqueeze(1), K_6d, outputs[("depth_pred", 0)].unsqueeze(1), padding_confidence_list)
 
         outputs["gauss_means"] = position_list
         outputs["gauss_opacity"] = opacity_list
         outputs["gauss_scaling"] = scaling_list
         outputs["gauss_rotation"] = rotation_list
         outputs["gauss_features_dc"] = feat_dc_list
+        outputs["gauss_offset"] = offset_list
             
         if self.binary_predictor:
             # save binary_voxel and binary_logits
