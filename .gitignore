@@ -182,6 +182,7 @@ note.txt
 *.txt
 *.ipynb
 *.png
+!assets/*.png
 *.jpg
 *.gif
 *.out
