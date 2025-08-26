@@ -1,14 +1,14 @@
-# 🌀 Voxel-GaussianAnything
+# Voxel-GaussianAnything
 
 **Voxel-GaussianAnything** is a research project for **generalizable 3D Gaussian Splatting and novel view synthesis from single-view monocular images, without diffusion models**.
 
 ---
-## 📊 Method Overview
+## Method Overview
 ![Pipeline](assets/voxelsplat.png)
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 - Uses **Microsoft Moge** monocular depth estimation + **DINO v2 ViT** to extract 3D feature point clouds.  
 - **Voxelization** of feature point cloud with predicted binary voxel occupancy.  
@@ -18,7 +18,7 @@
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Clone the Repository
 ```bash
@@ -40,5 +40,5 @@ bash evaluate.sh
 ```
 ---
 
-## 📜 License
+## License
 MIT License © 2025 [zifeiyuu](https://github.com/zifeiyuu)
