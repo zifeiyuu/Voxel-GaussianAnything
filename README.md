@@ -5,10 +5,11 @@
 ---
 ## Method Overview
 ![Pipeline](assets/voxelsplat.png)
-<img width="768" height="1024" alt="image" src="https://github.com/user-attachments/assets/20bbd3d7-421d-4e74-b8fd-b1011dafad32" />
-<img width="768" height="1024" alt="image" src="https://github.com/user-attachments/assets/79c6940a-38e1-42f1-abba-739579241b4d" />
-<img width="672" height="896" alt="image" src="https://github.com/user-attachments/assets/4037ec31-e775-47ca-a7b1-59a54d675787" />
-
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/20bbd3d7-421d-4e74-b8fd-b1011dafad32" width="30%" alt="fig-1" />
+  <img src="https://github.com/user-attachments/assets/79c6940a-38e1-42f1-abba-739579241b4d" width="30%" alt="fig-2" />
+  <img src="https://github.com/user-attachments/assets/4037ec31-e775-47ca-a7b1-59a54d675787" width="30%" alt="fig-3" />
+</div>
 
 
 ---
