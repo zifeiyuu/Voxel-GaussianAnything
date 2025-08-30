@@ -7,8 +7,8 @@
 ![Pipeline](assets/voxelsplat.png)
 
 # Results
-Left column: top left = single input image; left four = ground-truth (GT) pose strip for reference. 
-Right column: our generated novel views aligned to the GT poses.
+- Left column: top left = single input image; left four = ground-truth (GT) pose strip for reference.
+- Right column: our generated novel views aligned to the GT poses.
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/20bbd3d7-421d-4e74-b8fd-b1011dafad32" width="30%" alt="fig-1" />
